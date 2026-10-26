@@ -2,6 +2,15 @@
 
 
 
+## Before open-sourcing (decide later)
+- **Name:** something fun with a cheap domain.
+  - "Rotor Relay" is still the working title.
+  - Shortlist: Downwash (no game by that name found), Sling & Scoop, Hotshot Isle.
+  - Avoid "Dispatch" (a big 2025 game), "Longline" (an existing itch.io helicopter long-line game) and "Ember Isle" (taken).
+- **License:** MIT (simplest, recommended), Apache 2.0 or GPL 3.0. `public/sfx/airplane_prop.wav` stays under CC BY 3.0 with its credit.
+- **README banner:** state plainly that this is an experimental project built with AI coding agents (Claude and Gemini Argon), not a production game.
+- **Repo housekeeping:** a short CONTRIBUTING note pointing to AGENTS.md (the conventions and the `inspect.html` model check) and `npm test`.
+
 ## Post-deploy updates (planned)
 - **Damage and repairs:**
   - Hard landings and strikes fill a visible damage meter on the HUD, which could affect handling at high damage.
