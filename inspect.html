@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Model Inspector</title>
+  <link rel="icon" href="data:,">
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #d9dde3; font: 13px/1.5 ui-monospace, Menlo, monospace; color: #222; }
+    #ui { position: fixed; top: 10px; left: 12px; background: #fffc; padding: 6px 10px; border-radius: 6px; }
+    #ui a { margin-right: 8px; }
+  </style>
+</head>
+<body>
+  <div id="ui"></div>
+  <script type="module">
+    // Dev-only model viewer: /inspect.html?model=plane. Drag to orbit, wheel to zoom, keys 1-7 snap to fixed views.
+    // Check every join from every side before calling a model done.
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { buildChopper } from './src/chopper.js';
+    import { buildPlane } from './src/plane.js';
+    import { AIRFRAMES } from './src/career.js';
+    import { buildCrateMesh, buildHeavyMesh, buildPersonMesh } from './src/tools.js';
+
+    const MODELS = {
+      scout: () => buildChopper(AIRFRAMES.scout).group, utility: () => buildChopper(AIRFRAMES.utility).group,
+      heavy: () => buildChopper(AIRFRAMES.heavy).group, plane: () => buildPlane(AIRFRAMES.bomber).group,
+      crate: buildCrateMesh, container: () => buildHeavyMesh('container'), vehicle: () => buildHeavyMesh('vehicle'),
+      cabin: () => buildHeavyMesh('cabin'), person: buildPersonMesh,
+    };
+    const name = new URLSearchParams(location.search).get('model') || 'plane';
+    document.getElementById('ui').innerHTML = Object.keys(MODELS).map((k) => `<a href="?model=${k}">${k === name ? `<b>${k}</b>` : k}</a>`).join('') +
+      '<br>drag: orbit · wheel: zoom · 1 side 2 front 3 rear 4 top 5 under 6 front¾ 7 rear¾';
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.setSize(innerWidth, innerHeight);
+    document.body.appendChild(renderer.domElement);
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xd9dde3);
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x8888aa, 2.2), new THREE.GridHelper(40, 40, 0x666666, 0xaaaaaa), new THREE.AxesHelper(3));
+    const sun = new THREE.DirectionalLight(0xffffff, 2);
+    sun.position.set(-1, 2, -1.5);
+    scene.add(sun);
+
+    const model = MODELS[name]();
+    scene.add(model);
+    const box = new THREE.Box3().setFromObject(model), centre = box.getCenter(new THREE.Vector3()), size = box.getSize(new THREE.Vector3()).length();
+    const camera = new THREE.PerspectiveCamera(35, innerWidth / innerHeight, 0.05, 1000);
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.target.copy(centre);
+    const VIEWS = { 1: [1, 0.1, 0], 2: [0, 0.1, -1], 3: [0, 0.15, 1], 4: [0, 1, 0.001], 5: [0.2, -1, 0.1], 6: [-0.7, 0.4, -0.7], 7: [0.7, 0.35, 0.7] };
+    const view = (k) => { const [x, y, z] = VIEWS[k]; camera.position.copy(centre).add(new THREE.Vector3(x, y, z).normalize().multiplyScalar(size * 1.4)); controls.update(); };
+    view(6);
+    addEventListener('keydown', (e) => VIEWS[e.key] && view(e.key));
+    addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+    renderer.setAnimationLoop(() => renderer.render(scene, camera));
+  </script>
+</body>
+</html>
