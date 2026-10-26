@@ -465,7 +465,9 @@ function boardHtml(goal) {
   const km = (o) => (Math.hypot(o.x - s.pos.x, o.z - s.pos.z) / 1000).toFixed(1);
   const late = (o) => (o.type === 'fire' ? (o.house ? ` · <span class="dim">house lost in ${Math.ceil(SHIFT.houseBurn - o.house.burnT)}s</span>` : '') : ` · <span class="dim">${Math.max(0, Math.ceil((o.type === 'rescue' ? SHIFT.rescueTimeout : SHIFT.cargoTimeout) - o.age))}s</span>`);
   const heavyTag = (o) => (o.heavy ? ` <b class="heavy">HEAVY</b>${RIG.maxLift < RIG[o.heavy].mass ? ' <span class="dim">(need more lift)</span>' : ''}` : '');
-  const rows = d.calls.map((o, i) => `<div>[${i + 1}] ${tag(o.type)}${heavyTag(o)} ${o.title} · $${o.reward} · ${km(o)} km${late(o)}</div>`).join('') || '<div class="dim">No calls right now</div>';
+  const part = (o) => (o.story?.of > 1 ? `<div class="dim">${o.step > 1 ? '<b class="follow">FOLLOW-UP</b> · ' : ''}${o.story.name} · ${o.step}/${o.story.of}</div>` : '');
+  const bonus = (o) => (o.after && o.after === d.lastId ? ` <b class="follow">+${Math.round((SHIFT.followBonus - 1) * 100)}%</b>` : '');
+  const rows = d.calls.map((o, i) => `<div>[${i + 1}] ${tag(o.type)}${heavyTag(o)} ${o.title} · $${o.reward}${bonus(o)} · ${km(o)} km${late(o)}${part(o)}</div>`).join('') || '<div class="dim">No calls right now</div>';
   const job = d.job ? `<div class="job">${tag(d.job.type)} ${goal ? `${goal.text} · ${(goal.dist / 1000).toFixed(1)} km` : ''}<br><span class="dim">X: abandon</span></div>` : (d.calls.length ? `<div class="dim">Press ${d.calls.length > 1 ? `1–${d.calls.length}` : '1'} to take a call</div>` : '');
   return `<div class="head">DISPATCH <span>$${(career.bank + (mode === 'shift' ? d.stats.earned : 0)).toLocaleString()}</span></div>${rows}${job}`;
 }

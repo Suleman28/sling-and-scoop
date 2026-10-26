@@ -11,7 +11,6 @@ const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 
 // Shift tuning. Chaos fills to 100 from whatever is left unattended; the shift ends when it's full.
 export const SHIFT = {
-  maxCalls: 5,
   firePressure: 0.025,        // chaos/s per burning cell (half for the fire you're working)
   rescuePressure: 0.12,       // chaos/s per waiting casualty (half while it's your active job)
   cargoPressure: 0.04,        // chaos/s per waiting delivery (half while active)
@@ -19,6 +18,7 @@ export const SHIFT = {
   houseBurn: 75,              // seconds a house can stand in full flame before it's lost
   relief: 8,                  // chaos removed per completed job
   rescueTimeout: 180, cargoTimeout: 150,
+  followBonus: 1.25,          // pay multiplier for taking a story's next step straight after the last
   comboWindow: 60, comboStep: 0.25, comboMax: 3, // window: time to take the next call (it only runs while you're free and calls are waiting)
 };
 // Fire classes. A fire is never bigger than what you're flying can put out: power is water per load
@@ -30,9 +30,9 @@ const FIRES = [
 ];
 const GOODS = { hospital: ['Medical supplies', 'Oxygen cylinders', 'Blood supplies'], town: ['Groceries', 'Building materials', 'A generator', 'Water tanks', 'Mail'], base: ['Spare parts', 'Fuel drums'] };
 const FRAGILE = ['Medical supplies', 'Blood supplies'];
-// Director ramps up: shorter gaps, more simultaneous calls, more simultaneous fires.
+// Director ramps up: shorter gaps, more simultaneous stories (follow-ups don't count), more simultaneous fires.
 const spawnGap = (t) => Math.max(10, 28 - t / 12);
-const callCap = (t) => Math.min(SHIFT.maxCalls, 2 + Math.floor(t / 75));
+const storyCap = (t) => Math.min(3, 2 + Math.floor(t / 150));
 const fireCap = (t, big) => (big ? Math.min(3, 1 + Math.floor(t / 150)) : Math.min(2, 1 + Math.floor(t / 300)));
 export const comboMult = (combo) => Math.min(SHIFT.comboMax, 1 + SHIFT.comboStep * Math.max(0, combo - 1));
 
@@ -44,7 +44,7 @@ export function createDispatch(world, seed) {
   for (const h of world.houses) h.burnT = 0;
   return {
     can: () => true, firepower: () => 1, ...world, rng: mulberry32(seed), calls: [], job: null, t: 0, spawnT: 3, nextId: 1, props: [],
-    chaos: 0, combo: 0, comboT: 0, over: false,
+    chaos: 0, combo: 0, comboT: 0, lastId: 0, over: false,
     stats: { earned: 0, done: { fire: 0, cargo: 0, rescue: 0 }, bestCombo: 0, housesLost: 0, lost: 0 },
     view: buildMarkers(world.scene),
   };
@@ -71,7 +71,7 @@ function addProp(d, j, mesh) {
   d.scene.add(mesh);
 }
 function closeCall(d, j) {
-  if (j.prop) { d.scene.remove(j.prop); d.props.splice(d.props.indexOf(j.prop), 1); }
+  if (j.prop) { d.scene.remove(j.prop); d.props.splice(d.props.indexOf(j.prop), 1); j.prop = null; }
 }
 function carMesh(color) {
   const b = bodyBaker();
@@ -88,6 +88,51 @@ function roadSpot(d) {
     const r = pick(d, ROADS), k = 2 + Math.floor(d.rng() * (r.length - 4)), [x, z, y] = r[k], [x1, z1] = r[k + 1];
     if ([BASE, ...SITES].some((s) => Math.hypot(s.x - x, s.z - z) < 90)) continue;
     return { x, z, y, yaw: Math.atan2(x1 - x, z1 - z), near: nearestSite(x, z).name };
+  }
+  return null;
+}
+
+// ---- Stories: a first call plus plain-data follow-up steps (`rest`), built when the step before is done. ----
+
+// What a step needs: an airframe that does that kind of job and, for heavy cargo, the lift.
+const canDo = (d, s) => d.can(s.type) && !(s.heavy && RIG.maxLift < RIG[s.heavy].mass);
+function story(d, j, rest) {
+  rest = rest.filter((s) => canDo(d, s)); // steps this airframe can't do are skipped
+  return Object.assign(j, { story: { name: j.title, of: 1 + rest.length }, step: 1, rest });
+}
+const wreckStep = (spot) => ({ type: 'cargo', heavy: 'vehicle', from: { x: spot.x, z: spot.z, name: `the road near ${spot.near}`, exact: true }, to: BASE, prop: true });
+const flat = (x, z) => { const y = heightAt(x, z); return y >= 40 && y <= 150 && [[20, 0], [0, 20], [-20, 0], [0, -20]].every(([dx, dz]) => Math.abs(heightAt(x + dx, z + dz) - y) <= 6); };
+
+function cargoCall(d, base, { heavy, goods, from, to, prop }) {
+  const fragile = FRAGILE.includes(goods), pay = heavy ? RIG[heavy].pay : fragile ? 1.6 : 1;
+  const reward = Math.round(((120 + dist(from, to) * 0.25) * pay) / 10) * 10;
+  return { ...base, title: `${heavy ? RIG[heavy].label : goods}: ${from.name} → ${to.name}`, from, to, heavy, fragile, reward, x: from.x, z: from.z, keepProp: prop };
+}
+// A casualty at (x, z) to fly to dest (the hospital unless told otherwise).
+function rescue(d, base, title, x, z, a, k, { boater, dest = HOSPITAL } = {}) {
+  const person = addLoad(d, createCrate(x, groundAt(x, z), z, RIG.person), buildPersonMesh(!!boater));
+  return { ...base, title, boater, dest, person, x, z, reward: Math.round((a + dist(person.pos, dest) * k) / 10) * 10 };
+}
+function makeStep(d, s) {
+  const base = { id: d.nextId++, type: s.type, age: 0 };
+  if (s.type === 'cargo') return cargoCall(d, base, s);
+  if (s.near) {
+    for (let i = 0; i < 30; i++) {
+      const a = d.rng() * Math.PI * 2, r = 25 + d.rng() * 25, x = s.near.x + Math.cos(a) * r, z = s.near.z + Math.sin(a) * r;
+      if (flat(x, z)) return rescue(d, base, 'Their friend is still up there', x, z, 250, 0.25);
+    }
+    return null;
+  }
+  const a = d.rng() * Math.PI * 2;
+  return rescue(d, base, s.title, s.from.x + Math.cos(a) * 15, s.from.z + Math.sin(a) * 15, 150, 0.2, { dest: s.dest });
+}
+// The step after a finished one (null ends the story). A wreck takes over the crash/burnt-out car prop.
+function followUp(d, j) {
+  while (j.rest?.length) {
+    const c = makeStep(d, j.rest.shift());
+    if (!c) continue;
+    if (c.keepProp) { c.prop = j.prop; j.prop = null; }
+    return Object.assign(c, { story: j.story, step: j.step + 1, rest: j.rest, after: j.id });
   }
   return null;
 }
@@ -113,7 +158,9 @@ function spawn(d) {
       const h = pick(d, standing);
       if (ignite(d.fire, cellOf(h.x, h.z), id)) {
         d.fire.rate.set(id, 0.3);
-        return { ...base, title: h.site.hospital ? `Fire at ${h.site.name}` : `House fire in ${h.site.name}`, house: h, x: h.x, z: h.z, reward: 450, burnt: 0, housesLost: 0 };
+        const j = { ...base, title: h.site.hospital ? `Fire at ${h.site.name}` : `House fire in ${h.site.name}`, house: h, x: h.x, z: h.z, reward: 450, burnt: 0, housesLost: 0 };
+        const t = pick(d, SITES.filter((o) => !o.hospital && o !== h.site)); // the family needs a roof elsewhere, then materials
+        return h.site.hospital ? j : story(d, j, [{ type: 'rescue', title: `Displaced family: ${h.site.name} → ${t.name}`, from: h.site, dest: t }, { type: 'cargo', goods: 'Building materials', from: BASE, to: t }]);
       }
     }
     // A car alight on a road: catch it before it sets the verges going.
@@ -125,7 +172,7 @@ function spawn(d) {
       car.position.set(spot.x, spot.y + 0.25, spot.z);
       car.rotation.y = spot.yaw;
       addProp(d, j, car);
-      return j;
+      return story(d, j, [wreckStep(spot)]);
     }
     // Wildfire in forest a few hundred metres from a town, sized to what you're flying (the biggest you can fight, often).
     const fits = FIRES.filter((f) => power >= f.power), cls = d.rng() < 0.6 ? fits[fits.length - 1] : pick(d, fits);
@@ -135,7 +182,8 @@ function spawn(d) {
       if (fuelAt(x, z) < 0.75 || !ignite(d.fire, c, id)) continue;
       d.fire.rate.set(id, cls.rate);
       for (const [di, dj] of cls.seed) ignite(d.fire, c + di + dj * FIRE.n, id);
-      return { ...base, title: `${cls.name} near ${site.name}`, major: cls === FIRES[2], x, z, reward: cls.reward, burnt: 0, housesLost: 0 };
+      const j = { ...base, title: `${cls.name} near ${site.name}`, major: cls === FIRES[2], x, z, reward: cls.reward, burnt: 0, housesLost: 0 };
+      return story(d, j, [{ type: 'cargo', goods: pick(d, ['Water tanks', 'Groceries']), from: BASE, to: site }]);
     }
     return null;
   }
@@ -145,48 +193,38 @@ function spawn(d) {
     // expiring doesn't break your chain. Otherwise named goods go where they'd be needed.
     if (roll < 0.25) {
       const heavy = pick(d, ['container', 'vehicle', 'cabin']), spot = heavy === 'vehicle' && roadSpot(d);
-      const from = spot ? { x: spot.x, z: spot.z, name: `the road near ${spot.near}`, exact: true } : BASE, to = spot ? BASE : pick(d, SITES.filter((s) => !s.hospital));
       if (heavy === 'vehicle' && !spot) return null;
-      const reward = Math.round(((120 + dist(from, to) * 0.25) * RIG[heavy].pay) / 10) * 10;
-      return { ...base, title: `${RIG[heavy].label}: ${from.name} → ${to.name}`, from, to, heavy, reward, x: from.x, z: from.z };
+      return cargoCall(d, base, spot ? wreckStep(spot) : { heavy, from: BASE, to: pick(d, SITES.filter((s) => !s.hospital)) });
     }
     const to = pick(d, [BASE, ...SITES]), kind = to.hospital ? 'hospital' : to === BASE ? 'base' : 'town';
     const from = pick(d, [BASE, ...SITES].filter((s) => s !== to));
-    const goods = pick(d, GOODS[kind]), fragile = FRAGILE.includes(goods);
-    const reward = Math.round(((120 + dist(from, to) * 0.25) * (fragile ? 1.6 : 1)) / 10) * 10;
-    return { ...base, title: `${goods}: ${from.name} → ${to.name}`, from, to, fragile, reward, x: from.x, z: from.z };
+    const j = cargoCall(d, base, { goods: pick(d, GOODS[kind]), from, to });
+    if (!to.hospital) return j;
+    const t = pick(d, SITES.filter((o) => !o.hospital)); // supplies in, then a patient out
+    return story(d, j, [{ type: 'rescue', title: `Patient transfer: ${HOSPITAL.name} → ${t.name}`, from: HOSPITAL, dest: t }]);
   }
   // Rescue: a hiker high on the island, a boater adrift, a crash on a road, or a patient to move to the hospital.
   if (roll < 0.25) {
     const spot = roadSpot(d);
     if (!spot) return null;
-    const j = { ...base, title: `Car crash near ${spot.near}`, reward: 0 };
     const car = carMesh(pick(d, [0x2f7c7a, 0xd8a83a, 0xb84a39, 0xe8e2d6]));
     car.position.set(spot.x, spot.y + 0.25, spot.z);
     car.rotation.set(0, spot.yaw + 0.7, 0.12); // skewed across the road
+    const j = rescue(d, base, `Car crash near ${spot.near}`, spot.x + Math.cos(spot.yaw) * 4, spot.z - Math.sin(spot.yaw) * 4, 280, 0.25);
     addProp(d, j, car);
-    const px = spot.x + Math.cos(spot.yaw) * 4, pz = spot.z - Math.sin(spot.yaw) * 4;
-    j.person = addLoad(d, createCrate(px, groundAt(px, pz), pz, RIG.person), buildPersonMesh(false));
-    Object.assign(j, { x: px, z: pz, reward: Math.round((280 + dist(j.person.pos, HOSPITAL) * 0.25) / 10) * 10 });
-    return j;
+    return story(d, j, [wreckStep(spot)]);
   }
   if (roll < 0.45) {
-    const site = pick(d, SITES.filter((s) => !s.hospital)), a = d.rng() * Math.PI * 2, x = site.x + Math.cos(a) * 15, z = site.z + Math.sin(a) * 15;
-    const person = addLoad(d, createCrate(x, groundAt(x, z), z, RIG.person), buildPersonMesh(false));
-    return { ...base, title: `Patient transfer: ${site.name} → hospital`, person, reward: Math.round((150 + dist(site, HOSPITAL) * 0.2) / 10) * 10, x, z };
+    const site = pick(d, SITES.filter((s) => !s.hospital)), a = d.rng() * Math.PI * 2;
+    return rescue(d, base, `Patient transfer: ${site.name} → hospital`, site.x + Math.cos(a) * 15, site.z + Math.sin(a) * 15, 150, 0.2);
   }
   const boater = roll < 0.72;
   for (let i = 0; i < 400; i++) {
     let x, z;
     if (boater) { const a = d.rng() * Math.PI * 2, r = 950 + d.rng() * 350; x = Math.cos(a) * r; z = Math.sin(a) * r; if (heightAt(x, z) > -8) continue; }
-    else {
-      x = (d.rng() - 0.5) * 1600; z = (d.rng() - 0.5) * 1600;
-      const y = heightAt(x, z);
-      if (y < 40 || y > 150 || [[20, 0], [0, 20], [-20, 0], [0, -20]].some(([dx, dz]) => Math.abs(heightAt(x + dx, z + dz) - y) > 6)) continue;
-    }
-    const person = addLoad(d, createCrate(x, groundAt(x, z), z, RIG.person), buildPersonMesh(boater));
-    const reward = Math.round((250 + dist(person.pos, HOSPITAL) * 0.25) / 10) * 10;
-    return { ...base, title: boater ? 'Boater adrift' : 'Hiker stranded', boater, person, reward, x, z };
+    else { x = (d.rng() - 0.5) * 1600; z = (d.rng() - 0.5) * 1600; if (!flat(x, z)) continue; }
+    const j = rescue(d, base, boater ? 'Boater adrift' : 'Hiker stranded', x, z, 250, 0.25, { boater });
+    return boater || d.rng() < 0.6 ? j : story(d, j, [{ type: 'rescue', near: { x, z } }]); // sometimes a friend is still up there
   }
   return null;
 }
@@ -195,10 +233,13 @@ export function accept(d, i) {
   if (d.job || !d.calls[i]) return null;
   const job = (d.job = d.calls.splice(i, 1)[0]);
   job.chained = d.comboT > 0; // taken inside the window: finishing it extends the chain
+  job.bonus = job.after && job.after === d.lastId ? SHIFT.followBonus : 1; // a story's next step, taken straight after the last
+  d.lastId = 0;
   if (job.type === 'cargo' && !job.crate) {
     const a = d.rng() * Math.PI * 2, r = job.from.exact ? 0 : 17, x = job.from.x + Math.cos(a) * r, z = job.from.z + Math.sin(a) * r;
     job.crate = job.heavy ? addLoad(d, createCrate(x, groundAt(x, z), z, RIG[job.heavy]), buildHeavyMesh(job.heavy)) : addLoad(d, createCrate(x, groundAt(x, z), z), buildCrateMesh());
     job.worstHit = 0;
+    if (job.keepProp) closeCall(d, job); // the wreck is hooked: the stand-in prop goes
   }
   return job;
 }
@@ -208,6 +249,7 @@ export function abandon(d) {
   const job = d.job;
   if (!job) return;
   d.combo = d.comboT = 0;
+  job.bonus = 1;
   if (job.person?.aboard) { job.person.aboard = job.person.held = false; job.person.mesh.visible = true; }
   d.calls.unshift(job);
   d.job = null;
@@ -228,7 +270,7 @@ export function objective(d) {
   }
   const p = j.person;
   if (!p.aboard && !p.held) return { x: p.pos.x, z: p.pos.z, text: `${j.title}: land nearby to pick them up${j.boater && d.can('cargo') ? ', or hook them' : ''}` };
-  return { x: HOSPITAL.x, z: HOSPITAL.z, ring: true, text: `Fly them to ${HOSPITAL.name}${p.held && !p.aboard ? ': lower them into the ring' : ': land on the pad'}` };
+  return { x: j.dest.x, z: j.dest.z, ring: true, text: `Fly them to ${j.dest.name}${p.held && !p.aboard ? ': lower them into the ring' : ': land on the pad'}` };
 }
 
 // A burnt-out cell: charge it to the fire that burned it.
@@ -244,16 +286,19 @@ export function updateDispatch(d, dt, s, say) {
   const st = d.stats;
 
   const finish = (j, n, msg) => {
-    closeCall(d, j);
     d.combo = j.chained ? d.combo + 1 : 1;
     d.comboT = SHIFT.comboWindow;
     st.bestCombo = Math.max(st.bestCombo, d.combo);
-    const m = comboMult(d.combo), paid = Math.round(n * m);
+    const m = comboMult(d.combo), paid = Math.round(n * m * (j.bonus || 1));
     st.earned += paid;
     st.done[j.type]++;
     d.chaos = Math.max(0, d.chaos - SHIFT.relief);
-    say(`${msg}  +$${paid}${m > 1 ? `  (combo ×${m.toFixed(2)})` : ''}`);
+    say(`${msg}  +$${paid}${m > 1 ? `  (combo ×${m.toFixed(2)})` : ''}${j.bonus > 1 ? '  (follow-up bonus)' : ''}`);
     if (d.job === j) d.job = null;
+    d.lastId = j.id;
+    const next = followUp(d, j);
+    if (next) { d.calls.unshift(next); say(`Follow-up: ${next.title}`, true); }
+    closeCall(d, j);
   };
   const fail = (j, msg, chaos) => {
     closeCall(d, j);
@@ -265,7 +310,7 @@ export function updateDispatch(d, dt, s, say) {
     else d.calls.splice(d.calls.indexOf(j), 1);
   };
 
-  if ((d.spawnT -= dt) <= 0 && d.calls.length < callCap(d.t)) {
+  if ((d.spawnT -= dt) <= 0 && new Set(incidents(d).map((j) => j.story || j)).size < storyCap(d.t)) {
     const o = spawn(d);
     if (o) { d.calls.push(o); say(`New call: ${o.title}`, true); }
     d.spawnT = spawnGap(d.t) * (0.7 + d.rng() * 0.6);
@@ -326,10 +371,10 @@ export function updateDispatch(d, dt, s, say) {
       if ((j.boardT = (j.boardT || 0) + dt) > 1.5) { p.aboard = p.held = true; p.mesh.visible = false; say('Casualty aboard'); }
     } else j.boardT = 0;
     if (p.aboard) p.pos.copy(s.pos); // rides along (hidden) so abandoning sets them down where you are
-    if (p.aboard && s.grounded && dist(s.pos, HOSPITAL) < PAD_RADIUS + 4) { removeLoad(d, p); finish(j, j.reward, 'Casualty delivered to hospital!'); }
-    else if (!p.held && dist(p.pos, HOSPITAL) < 16 && p.vel.lengthSq() < 0.05) {
+    if (p.aboard && s.grounded && dist(s.pos, j.dest) < PAD_RADIUS + 4) { removeLoad(d, p); finish(j, j.reward, `Casualty delivered to ${j.dest.name}!`); }
+    else if (!p.held && dist(p.pos, j.dest) < 16 && p.vel.lengthSq() < 0.05) {
       removeLoad(d, p);
-      finish(j, p.hit > 8 ? Math.round(j.reward / 2) : j.reward, p.hit > 8 ? 'Delivered, but that landing hurt.' : 'Casualty delivered to hospital!');
+      finish(j, p.hit > 8 ? Math.round(j.reward / 2) : j.reward, p.hit > 8 ? 'Delivered, but that landing hurt.' : `Casualty delivered to ${j.dest.name}!`);
     }
   }
 
