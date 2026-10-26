@@ -1,6 +1,10 @@
 # Plan: "Dispatch" — low-poly helicopter rescue/cargo game (browser)
 
 ## Resolved decisions (Phase 6a: menus, free roam, living island)
+- **Per-airframe upgrades (economy pass):** `career.levels[airframe][upgrade]`, 5 levels each; buying applies to the airframe you're flying. Only applicable rows show: Scout power/fuel; Utility and Heavy all four; Bomber water (tank)/power/fuel. Old shared-levels saves are copied to every owned airframe (clamped). Airframe prices Utility 5k, Heavy 14k, Bomber 22k (was 4k/10k/15k).
+  - Base cost per level (L1..L5) times the class multiplier (Scout 0.6, Utility 1, Heavy 1.8, Bomber 2.2), rounded to $50: water 400/800/1300/1800/2200, line 250/500/800/1100/1350, power 500/1000/1600/2200/2700, fuel 350/650/1100/1500/1900.
+  - Full upgrade: Scout $8,050; Utility $24,000 (4.8x price); Heavy $43,250 (3.1x); Bomber $44,000 (2.0x). Whole fleet about $160k including purchases (was about $57k).
+  - Per level: water +16%, line +1.8 m, thrust +5%, climb +7%, load slowdown -12%, lift +0.1, fuel +20% (was +30%, +2.5 m, 7%, 10%, 20%, 0.15, +30%).
 - **Menus:** start menu over a slow orbit of the parked aircraft: 1 Start shift, 2 Free roam, 3 Hangar (click or key). Esc pauses (freezes the shift clock): resume, hangar (at base, or anywhere in free roam), end shift (banks earnings) or main menu. The HUD only shows while flying.
 - **Daily shift removed:** without a shared leaderboard it played the same as a normal shift. Bring it back alongside a leaderboard if one is ever added.
 - **Free roam:** no calls, unlimited fuel, fires out, hangar from anywhere.

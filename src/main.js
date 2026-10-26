@@ -7,7 +7,7 @@ import { makeParticles } from './fx.js';
 import { buildLife } from './life.js';
 import { act, winch, buildRigView, createRig, hangOf, massOf, nearestCrate, placeCrateMesh, RIG, stepCrate, stepRig, swapTool } from './tools.js';
 import { buildFireView, createFire, douse, resetFire, stepFire } from './fire.js';
-import { AIRFRAMES, applyLoadout, buyOrSelectAirframe, buyUpgrade, loadCareer, recordShift, saveCareer, UPGRADES } from './career.js';
+import { AIRFRAMES, applyLoadout, buyOrSelectAirframe, buyUpgrade, loadCareer, MAX_LEVEL, recordShift, saveCareer, upgradeCost, UPGRADES, upgradesFor } from './career.js';
 import { abandon, accept, comboMult, createDispatch, disposeDispatch, onScorch, SHIFT, updateDispatch, updateMarkers } from './missions.js';
 
 const STEP = 1 / 60;
@@ -478,30 +478,31 @@ function meterHtml() {
   return `<div class="row"><span>CHAOS</span><div class="bar"><i class="${d.chaos > 75 ? 'hot' : ''}" style="width:${d.chaos}%"></i></div><span>${mins}</span></div>${combo}`;
 }
 
-// ---- Hangar: spend the bank between shifts. Keys 1-4 upgrade, 5-7 buy or switch airframe. ----
+// ---- Hangar: spend the bank between shifts. Keys 1-n upgrade the airframe you're flying, then buy or switch airframe. ----
 
-const UPGRADE_KEYS = Object.keys(UPGRADES), AIRFRAME_KEYS = Object.keys(AIRFRAMES);
+const AIRFRAME_KEYS = Object.keys(AIRFRAMES);
 function openHangar(msg = '') {
   if (mode !== 'hangar') backTo = mode;
   setMode('hangar');
-  const pips = (n) => '▮'.repeat(n) + '▯'.repeat(3 - n);
-  const ups = UPGRADE_KEYS.map((k, i) => {
-    const u = UPGRADES[k], lvl = career.levels[k], cost = u.cost[lvl];
+  const pips = (n) => '▮'.repeat(n) + '▯'.repeat(MAX_LEVEL - n);
+  const upKeys = upgradesFor(career.airframe);
+  const ups = upKeys.map((k, i) => {
+    const u = UPGRADES[k], lvl = career.levels[career.airframe][k], cost = lvl < MAX_LEVEL && upgradeCost(career.airframe, k, lvl);
     return `<tr data-key="Digit${i + 1}"><td>[${i + 1}] ${u.name}</td><td>${pips(lvl)}</td><td class="dim">${u.blurb}</td><td>${cost ? `$${cost.toLocaleString()}` : 'MAX'}</td></tr>`;
   }).join('');
   const frames = AIRFRAME_KEYS.map((k, i) => {
     const a = AIRFRAMES[k], state = career.airframe === k ? 'FLYING' : career.owned.includes(k) ? 'owned' : `$${a.cost.toLocaleString()}`;
-    return `<tr data-key="Digit${UPGRADE_KEYS.length + i + 1}"><td>[${UPGRADE_KEYS.length + i + 1}] ${a.name}</td><td></td><td class="dim">${a.blurb}</td><td>${state}</td></tr>`;
+    return `<tr data-key="Digit${upKeys.length + i + 1}"><td>[${upKeys.length + i + 1}] ${a.name}</td><td></td><td class="dim">${a.blurb}</td><td>${state}</td></tr>`;
   }).join('');
   overlay.innerHTML = `<h1>HANGAR</h1><p>Bank <b>$${career.bank.toLocaleString()}</b></p>
-    <table class="hangar"><tr><th colspan="4">Upgrades</th></tr>${ups}<tr><th colspan="4">Airframes</th></tr>${frames}</table>
+    <table class="hangar"><tr><th colspan="4">Upgrades: ${airframe().name}</th></tr>${ups}<tr><th colspan="4">Airframes</th></tr>${frames}</table>
     <p class="msg">${msg}</p>${backTo === 'shift' ? '<p class="dim">Your shift is still running!</p>' : ''}<nav class="menu row">${btn('Escape', 'Back')}</nav>`;
 }
 function hangarKey(code) {
   if (code === 'KeyH' || code === 'Escape') return setMode(backTo);
-  const n = /^Digit(\d)$/.exec(code)?.[1] - 1;
+  const n = /^Digit(\d)$/.exec(code)?.[1] - 1, upKeys = upgradesFor(career.airframe);
   if (!(n >= 0)) return;
-  const msg = n < UPGRADE_KEYS.length ? buyUpgrade(career, UPGRADE_KEYS[n]) : AIRFRAME_KEYS[n - UPGRADE_KEYS.length] ? buyOrSelectAirframe(career, AIRFRAME_KEYS[n - UPGRADE_KEYS.length]) : '';
+  const msg = n < upKeys.length ? buyUpgrade(career, upKeys[n]) : AIRFRAME_KEYS[n - upKeys.length] ? buyOrSelectAirframe(career, AIRFRAME_KEYS[n - upKeys.length]) : '';
   if (!msg) return;
   refit();
   openHangar(msg);
