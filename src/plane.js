@@ -15,7 +15,7 @@ export const PLANE = {
   autoLevel: 0.6, pitchLevel: 0.5,   // roll / pitch ease back toward level when A/D / W/S are released
   maxPitch: 0.55,                    // ~32 degrees: steep enough to climb out, hard to stall by accident
   follow: 2.2,                       // how fast the flight path swings round to the nose (momentum)
-  tank: 6, scoopRate: 2.5, scoopSpeed: 18, scoopHeight: 3, dropRate: 3, // skim within scoopHeight of the sea to fill
+  tank: 6, scoopRate: 2.5, scoopSpeed: 18, scoopHeight: 3, dropRate: 2.4, // skim within scoopHeight of the sea to fill
   burn: 1 / 420,
   rollDrag: 0.04, brake: 4, waterDrag: 0.15,
   hardSink: 6,                       // sink rate that turns a touchdown into a hard landing

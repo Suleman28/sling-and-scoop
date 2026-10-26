@@ -23,10 +23,11 @@ export const SHIFT = {
 };
 // Fire classes. A fire is never bigger than what you're flying can put out: power is water per load
 // (Utility bucket 1, Heavy Lifter 2.8, bomber 6; more with upgrades).
-const FIRES = [
+// (Major: a 9-cell-wide diamond, ~85 cells. test/firefight.check.js checks each class against its aircraft.)
+export const FIRES = [
   { name: 'Wildfire', power: 0, rate: 0.6, seed: [[1, 0]], reward: 400 },
   { name: 'Large wildfire', power: 2, rate: 1, seed: [[1, 0], [0, 1], [-1, 0], [0, -1]], reward: 750 },
-  { name: 'Major wildfire', power: 5, rate: 1.5, seed: [[1, 0], [0, 1], [-1, 0], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]], reward: 1200 },
+  { name: 'Major wildfire', power: 5, rate: 3, seed: [...Array(81)].map((_, i) => [(i % 9) - 4, Math.floor(i / 9) - 4]).filter(([i, j]) => Math.abs(i) + Math.abs(j) < 7), reward: 1200 },
 ];
 const GOODS = { hospital: ['Medical supplies', 'Oxygen cylinders', 'Blood supplies'], town: ['Groceries', 'Building materials', 'A generator', 'Water tanks', 'Mail'], base: ['Spare parts', 'Fuel drums'] };
 const FRAGILE = ['Medical supplies', 'Blood supplies'];
