@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
-import { createPlane, drop, PLANE, stepPlane } from '../src/plane.js';
+import { buildPlane, createPlane, drop, PLANE, stepPlane } from '../src/plane.js';
+
+const m = buildPlane(), p = m.group.children[0].geometry.attributes.position.array;
+assert.ok(p.length > 0 && p.every(Number.isFinite), 'plane geometry finite');
+m.spin(1 / 60, 1);
 
 const dt = 1 / 60, sea = { groundAt: () => 0, heightAt: () => -20 }, land = { groundAt: () => 6, heightAt: () => 6 };
 const run = (s, input, secs, env = sea, each = () => {}) => {

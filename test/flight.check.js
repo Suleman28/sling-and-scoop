@@ -1,5 +1,13 @@
 import assert from 'node:assert/strict';
-import { createFlight, stepFlight } from '../src/chopper.js';
+import { buildChopper, createFlight, stepFlight } from '../src/chopper.js';
+import { AIRFRAMES } from '../src/career.js';
+
+// All chopper models build cleanly with finite geometry and spin without error.
+for (const k of ['scout', 'utility', 'heavy']) {
+  const m = buildChopper(AIRFRAMES[k]), p = m.group.children[0].geometry.attributes.position.array;
+  assert.ok(p.length > 0 && p.every(Number.isFinite), `${k} geometry finite`);
+  m.spin(1 / 60, 1, createFlight(0, 10, 0, 0));
+}
 
 const dt = 1 / 60, flat = { groundAt: () => 10 };
 const idle = { fwd: 0, turn: 0, lift: 0, strafe: 0 };

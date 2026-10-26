@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { act, createCrate, createRig, massOf, RIG, stepCrate, stepRig, swapTool, winch } from '../src/tools.js';
+import { act, buildBucketMesh, buildCrateMesh, buildHeavyMesh, buildHookMesh, buildPersonMesh, createCrate, createRig, massOf, RIG, stepCrate, stepRig, swapTool, winch } from '../src/tools.js';
 import { createFlight, stepFlight } from '../src/chopper.js';
+
+for (const fn of [buildBucketMesh, buildHookMesh, buildCrateMesh, () => buildHeavyMesh('container'), () => buildHeavyMesh('vehicle'), () => buildHeavyMesh('cabin'), () => buildPersonMesh(false), () => buildPersonMesh(true)]) {
+  const g = fn(), p = g.children[0].geometry.attributes.position.array;
+  assert.ok(p.length > 0 && p.every(Number.isFinite));
+}
 
 const dt = 1 / 60;
 const heli = (y) => ({ pos: new THREE.Vector3(0, y, 0), vel: new THREE.Vector3() });
@@ -106,6 +111,19 @@ const run = (r, s, secs, env, move = () => s.vel.set(0, 0, 0), each = () => {}) 
   const low = r.pos.y;
   run(r, s, 3, land, undefined, () => winch(r, -1, dt));
   assert.ok(r.len === RIG.minLine && r.pos.y > low + 5, `reeled in to ${r.len}`);
+  run(r, s, 1, land, undefined, () => winch(r, 1, dt));
+  const kept = r.len;
+  assert.ok(swapTool(r) && Math.abs(r.len - kept) < 1e-9, 'tool swap preserves rope length');
+  run(r, s, 3, land, undefined, () => winch(r, -1, dt));
+  assert.ok(Math.abs(r.len - 0.1) < 1e-9 && !r.taut, `hook retracts fully to ${r.len}`);
+  assert.ok(swapTool(r) && Math.abs(r.len - RIG.minLine) < 1e-9, 'switching back to bucket restores working length');
+  // Extending a hanging load stays taut and lowers at a smooth uniform rate every frame.
+  for (let i = 0; i < 60; i++) {
+    const prevY = r.pos.y;
+    winch(r, 1, dt);
+    stepRig(r, s, dt, land);
+    assert.ok(r.taut && Math.abs((prevY - r.pos.y) - RIG.winchSpeed * dt) < 0.01, `smooth extension step ${prevY - r.pos.y}`);
+  }
   run(r, s, 6, land, undefined, () => winch(r, 1, dt));
   assert.equal(r.len, RIG.bucket.line);
 }
