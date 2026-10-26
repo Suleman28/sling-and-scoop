@@ -487,16 +487,63 @@ function buildPad(at, home) {
     flat(56, 50, 0x6e6874, -6 * k, 2);                                     // apron
     flat(22, 14, 0x6e6874, 32 * k, 0, 0.04);                               // taxiway to the runway edge
     for (let x = 24; x < 40; x += 4) flat(2, 0.5, 0xffd27a, x * k, 0, 0.07); // taxi line
-    b.add(new THREE.BoxGeometry(16, 8, 20), 0xd9c4b0, -30 * k, 4, 4);       // hangar, its door facing the pad
-    b.add(new THREE.CylinderGeometry(8, 8, 20.4, 8, 1, false, -Math.PI / 2, Math.PI).rotateX(-Math.PI / 2), 0x2f7c7a, -30 * k, 8, 4);
-    b.add(new THREE.BoxGeometry(0.2, 6, 14), 0x4a4652, -21.9 * k, 3, 4);
     b.add(new THREE.BoxGeometry(5, 3.2, 6), 0xf3e3c8, -24 * k, 1.6, -16);  // ops hut with a control cab
     b.add(new THREE.BoxGeometry(3, 2, 3), 0x1f3346, -24 * k, 4.2, -16);
   }
-  const g = new THREE.Mesh(b.geometry(), new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }));
+  const mat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }), g = new THREE.Group();
+  g.add(new THREE.Mesh(b.geometry(), mat));
+  if (home) { // the hangar is built door-forward along +x, so it's turned round when the layout is mirrored
+    const h = new THREE.Mesh(baked(hangar), mat);
+    h.position.set(-33 * k, 0, 3);
+    h.rotation.y = k > 0 ? 0 : Math.PI;
+    g.add(h);
+  }
   g.position.set(at.x, at.y, at.z);
   g.rotation.y = at.yaw;
   return g;
+}
+const baked = (fill) => { const b = bodyBaker(); fill(b); return b.geometry(); };
+
+// Arched maintenance hangar, ground at y = 0, door end facing +x: corrugated cladding with ribs, an arched roof with
+// rib bands and ridge vents, three sliding door panels (one run back to show the dark bay), a glazed gable with an
+// orange sign band, a lean-to office on the -z side, downpipes and floodlights. About 18 m long, 16 m wide.
+export function hangar(b) {
+  const L = 18, W = 16, H = 6, R = W / 2, CLAD = 0xd9c4b0, RIB = shade(CLAD, 0.82), ROOF = 0x2f7c7a, STEEL = 0x5b5566, ORANGE = 0xf2763a;
+  const arc = (r, len, color, x) => b.add(new THREE.CylinderGeometry(r, r, len, 16, 1, true, 0, Math.PI).rotateZ(Math.PI / 2), color, x, H + 0.3, 0);
+  b.add(new THREE.BoxGeometry(L + 3, 0.3, W + 2), 0x8f8790, 0.5, 0.15, 0);                                   // slab, lipped at the door
+  for (const sz of [-1, 1]) {
+    b.add(new THREE.BoxGeometry(L, H, 0.3), CLAD, 0, H / 2 + 0.3, sz * W / 2);                             // side walls
+    for (let x = -L / 2 + 0.75; x < L / 2; x += 1.5) b.add(new THREE.BoxGeometry(0.14, H, 0.12), RIB, x, H / 2 + 0.3, sz * (W / 2 + 0.16));
+    for (const x of [-5, 0, 5]) windowAt(b, 'z', sz, x, H - 0.9, sz * (W / 2 + 0.2), 2.2, 0.8);
+    for (const x of [-L / 2 + 0.3, L / 2 - 0.3]) b.add(new THREE.CylinderGeometry(0.12, 0.12, H, 6), STEEL, x, H / 2 + 0.3, sz * (W / 2 + 0.3)); // downpipes
+  }
+  b.add(new THREE.BoxGeometry(0.3, H, W), CLAD, -L / 2, H / 2 + 0.3, 0);                                    // back wall
+  arc(R, L + 0.6, ROOF, 0);                                                                                 // arched roof
+  for (let x = -L / 2; x <= L / 2 + 0.01; x += 3) arc(R + 0.1, 0.3, 0x25605e, x);                           // rib bands
+  for (const x of [-5, 0, 5]) b.add(new THREE.BoxGeometry(1.2, 0.7, 1.2), STEEL, x, H + 0.3 + R + 0.2, 0);  // ridge vents
+  for (const [sx, rot] of [[1, Math.PI / 2], [-1, -Math.PI / 2]]) b.add(new THREE.CircleGeometry(R, 16, 0, Math.PI).rotateY(rot), CLAD, sx * L / 2, H + 0.3, 0); // gables
+  b.add(new THREE.BoxGeometry(0.12, 0.6, W), ORANGE, L / 2 + 0.06, H + 0.6, 0);                            // sign band
+  b.add(new THREE.BoxGeometry(0.1, 1.2, 9), GLASS, L / 2 + 0.06, H + 2.4, 0);                               // gable glazing
+  for (let z = -4.5; z <= 4.5; z += 1.5) b.add(new THREE.BoxGeometry(0.16, 1.3, 0.1), TRIM, L / 2 + 0.08, H + 2.4, z);
+  // Door end: corner wall pieces, a dark bay behind, two closed panels and one run back to open the bay.
+  for (const sz of [-1, 1]) b.add(new THREE.BoxGeometry(0.3, H, 2), CLAD, L / 2, H / 2 + 0.3, sz * 7);
+  b.add(new THREE.BoxGeometry(0.1, H, W - 1), 0x2a2a32, L / 2 - 2.5, H / 2 + 0.3, 0);
+  b.add(new THREE.BoxGeometry(0.3, 0.3, W), 0x2a2a32, L / 2 + 0.3, H + 0.15, 0);                           // door track
+  for (const [x, z] of [[L / 2 + 0.15, -4], [L / 2 + 0.15, 0], [L / 2 + 0.45, 1.6]]) {
+    b.add(new THREE.BoxGeometry(0.2, H - 0.3, 4), shade(CLAD, 0.92), x, (H - 0.3) / 2 + 0.3, z);
+    for (let y = 1.2; y < H; y += 1.1) b.add(new THREE.BoxGeometry(0.24, 0.08, 4.02), RIB, x, y, z);
+  }
+  // Lean-to office on the -z side: flat roof, windows, a door.
+  b.add(new THREE.BoxGeometry(8, 3.2, 4), shade(CLAD, 1.04), -3, 1.9, -W / 2 - 2);
+  b.add(new THREE.BoxGeometry(8.6, 0.25, 4.6), STEEL, -3, 3.6, -W / 2 - 2);
+  for (const x of [-5.5, -3.5, -1.5]) windowAt(b, 'z', -1, x, 2.2, -W / 2 - 4, 1.2, 0.9);
+  b.add(new THREE.BoxGeometry(1, 2, 0.1), WOOD, 0.2, 1.3, -W / 2 - 4.03);
+  // Floodlights on poles at the door corners, angled at the apron.
+  for (const sz of [-1, 1]) {
+    b.add(new THREE.CylinderGeometry(0.1, 0.14, 7.5, 6), STEEL, L / 2 + 1.2, 3.75, sz * (W / 2 + 0.8));
+    b.add(new THREE.BoxGeometry(0.8, 0.5, 1).rotateZ(-0.5), 0x2a2a32, L / 2 + 1.5, 7.5, sz * (W / 2 + 0.8));
+    b.add(new THREE.BoxGeometry(0.1, 0.4, 0.8).rotateZ(-0.5), 0xfff2b0, L / 2 + 1.75, 7.35, sz * (W / 2 + 0.8));
+  }
 }
 
 const shade = (hex, k) => new THREE.Color(hex).multiplyScalar(k).getHex();
