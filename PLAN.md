@@ -1,5 +1,12 @@
 # Plan: "Dispatch" — low-poly helicopter rescue/cargo game (browser)
 
+## Resolved decisions (Running costs)
+- **Shifts net less than they gross.** `COSTS` in `career.js`; bills via `fuelBill(career, kind, amount)` and `repairBill(career, kind, hit)` (they take `career` so island projects can discount later). Shift net = earned − fuel − repairs − losses, banked by `recordShift(c, earned, costs)`; best shift is on net; the bank may go slightly negative (never blocks flying).
+  - Fuel $ per full tank: scout 150, utility 350, heavy 700, bomber 800. Charged as the tank fills on pads/strip (shown in the refuel prompt); free roam is free.
+  - Repairs: $12 per m/s of impact above 3 m/s, times class (scout 0.6, utility 1, heavy 2, bomber 2.2). Only the airframe's own `s.hit` counts, summed per frame, billed at shift end.
+  - Losses: $150 smashed fragile cargo, $200 casualty hurt by a rough set-down.
+  - Target: ~20% of a typical ~$2.5k Utility gross when careful (about 1.3 tanks, a few small bumps), 35%+ when crashing (each 14 m/s crash is about $130, plus losses).
+
 ## Resolved decisions (Phase 6a: menus, free roam, living island)
 - **Menus:** start menu over a slow orbit of the parked aircraft: 1 Start shift, 2 Free roam, 3 Hangar (click or key). Esc pauses (freezes the shift clock): resume, hangar (at base, or anywhere in free roam), end shift (banks earnings) or main menu. The HUD only shows while flying.
 - **Daily shift removed:** without a shared leaderboard it played the same as a normal shift. Bring it back alongside a leaderboard if one is ever added.

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { BASE, fuelAt, groundAt, heightAt, mulberry32, PAD_RADIUS, ROADS, SITES } from './world.js';
 import { cellOf, FIRE, fireStatus, ignite } from './fire.js';
 import { bodyBaker, DARK, GLASS } from './chopper.js';
+import { COSTS } from './career.js';
 import { buildHeavyMesh, buildCrateMesh, buildPersonMesh, createCrate, RIG } from './tools.js';
 
 const HOSPITAL = SITES.find((s) => s.hospital);
@@ -45,7 +46,7 @@ export function createDispatch(world, seed) {
   return {
     can: () => true, firepower: () => 1, ...world, rng: mulberry32(seed), calls: [], job: null, t: 0, spawnT: 3, nextId: 1, props: [],
     chaos: 0, combo: 0, comboT: 0, over: false,
-    stats: { earned: 0, done: { fire: 0, cargo: 0, rescue: 0 }, bestCombo: 0, housesLost: 0, lost: 0 },
+    stats: { earned: 0, done: { fire: 0, cargo: 0, rescue: 0 }, bestCombo: 0, housesLost: 0, lost: 0, fuel: 0, repairs: 0, losses: 0 },
     view: buildMarkers(world.scene),
   };
 }
@@ -317,7 +318,7 @@ export function updateDispatch(d, dt, s, say) {
     if (resting && dist(c.pos, j.to) < 14) {
       const rough = j.worstHit > (j.fragile ? 5 : 9);
       removeLoad(d, c);
-      if (rough && j.fragile) fail(j, 'Fragile cargo smashed. No pay, combo lost.', SHIFT.expireChaos);
+      if (rough && j.fragile) { st.losses += COSTS.loss.cargo; fail(j, 'Fragile cargo smashed. No pay, combo lost.', SHIFT.expireChaos); }
       else finish(j, rough ? Math.round(j.reward * 0.4) : j.reward, rough ? 'Cargo delivered, but damaged.' : 'Cargo delivered!');
     }
   } else if (j?.type === 'rescue') {
@@ -329,6 +330,7 @@ export function updateDispatch(d, dt, s, say) {
     if (p.aboard && s.grounded && dist(s.pos, HOSPITAL) < PAD_RADIUS + 4) { removeLoad(d, p); finish(j, j.reward, 'Casualty delivered to hospital!'); }
     else if (!p.held && dist(p.pos, HOSPITAL) < 16 && p.vel.lengthSq() < 0.05) {
       removeLoad(d, p);
+      if (p.hit > 8) st.losses += COSTS.loss.casualty;
       finish(j, p.hit > 8 ? Math.round(j.reward / 2) : j.reward, p.hit > 8 ? 'Delivered, but that landing hurt.' : 'Casualty delivered to hospital!');
     }
   }
