@@ -9,12 +9,43 @@
     html, body { margin: 0; height: 100%; overflow: hidden; background: #2a2648; font: 13px/1.4 ui-monospace, Menlo, monospace; color: #fff4e6; }
     canvas { display: block; }
     #hud { position: fixed; top: 12px; left: 14px; pointer-events: none; text-shadow: 0 1px 2px #0008; white-space: pre; }
+    #prompt { position: fixed; bottom: 44px; left: 0; right: 0; text-align: center; font-size: 16px; pointer-events: none; text-shadow: 0 1px 3px #000a; }
+    #board { position: fixed; top: 12px; right: 14px; width: min(360px, 60vw); pointer-events: none; background: #1d1830b0; border-radius: 6px; padding: 8px 10px; text-shadow: 0 1px 2px #0008; }
+    #board .head { font-weight: bold; letter-spacing: .1em; margin-bottom: 4px; display: flex; justify-content: space-between; }
+    #board .job { margin-top: 6px; padding-top: 6px; border-top: 1px solid #fff3; }
+    #board .dim { opacity: .65; }
+    #board .fire { color: #ff7a4a; } #board .cargo { color: #ffd060; } #board .rescue { color: #6fdcff; } #board .heavy { color: #9fd0ff; }
+    #meter { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); width: min(340px, 50vw); text-align: center; pointer-events: none; text-shadow: 0 1px 2px #0008; }
+    #meter .row { display: flex; gap: 8px; align-items: center; }
+    .bar { flex: 1; height: 10px; background: #0005; border-radius: 5px; overflow: hidden; margin: 4px 0; }
+    .bar i { display: block; height: 100%; background: #ffb347; transition: width .2s; }
+    .bar i.hot { background: #ff4a2a; }
+    .bar.thin { height: 4px; } .bar.thin i { background: #6fdcff; }
+    .combo { color: #6fdcff; font-weight: bold; }
+    #overlay { position: fixed; inset: 0; display: grid; place-content: center; text-align: center; background: #1d1830a0; font-size: 15px; padding: 16px; }
+    #overlay h1 { font-size: 34px; letter-spacing: .2em; margin: 0 0 8px; }
+    #overlay table { margin: 12px auto; border-spacing: 18px 4px; text-align: left; }
+    #overlay td:last-child { text-align: right; } #overlay .big td { font-size: 20px; font-weight: bold; color: #ffd060; }
+    #overlay .dim { opacity: .7; }
+    #overlay table.hangar { border-spacing: 14px 6px; } #overlay th { text-align: left; opacity: .6; font-weight: normal; letter-spacing: .15em; padding-top: 8px; }
+    #overlay .msg { color: #ffd060; min-height: 1.4em; }
     #help { position: fixed; bottom: 12px; left: 14px; pointer-events: none; opacity: .8; text-shadow: 0 1px 2px #0008; }
   </style>
 </head>
 <body>
   <div id="hud"></div>
-  <div id="help">W/S pitch · A/D turn · Q/E strafe · Space/Shift climb/descend · M mute</div>
+  <div id="board"></div>
+  <div id="meter" style="display:none"></div>
+  <div id="overlay">
+    <h1>ROTOR RELAY</h1>
+    <p>Island air dispatch: fight wildfires, sling cargo, pull people out of trouble.</p>
+    <p class="dim">Every call you leave waiting feeds the chaos meter. When it fills, your shift ends.<br>Finish jobs back to back to chain them for bonus pay.</p>
+    <p><b>1</b>: Start a shift &nbsp;·&nbsp; <b>2</b>: Daily shift (the same calls for everyone today) &nbsp;·&nbsp; <b>H</b>: Hangar</p>
+    <p class="dim">Or just fly around first.</p>
+    <p class="dim" style="font-size:11px">Bomber engine sound: "airplane prop loop" by AntumDeluge, from a recording by jakobthiesen (CC BY 3.0)</p>
+  </div>
+  <div id="prompt"></div>
+  <div id="help">W/S pitch · A/D turn · Q/E strafe · Space/Shift climb/descend · F action · R bucket/hook · Z/C winch · 1–5 take call · X abandon · mouse drag look · wheel zoom · M mute</div>
   <script type="module" src="/src/main.js"></script>
 </body>
 </html>

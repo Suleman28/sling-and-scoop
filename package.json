@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test": "node test/flight.check.js"
+    "test": "node test/flight.check.js && node test/rig.check.js && node test/fire.check.js && node test/shift.check.js && node test/career.check.js && node test/plane.check.js"
   },
   "dependencies": {
     "three": "^0.186.1"
