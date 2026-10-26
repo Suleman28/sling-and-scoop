@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { bodyBaker, GLASS, reflect } from './chopper.js';
+import { bodyBaker, GLASS, reflect, strut } from './chopper.js';
 
 export const SEED = 1337;           // fixed map seed: the career island stays learnable
 export const SIZE = 2800;           // terrain square, metres
@@ -371,7 +371,7 @@ function buildTrees() {
     const x = (rng() - 0.5) * SIZE, z = (rng() - 0.5) * SIZE, y = heightAt(x, z), roll = rng(), f = forest(x, z);
     if (y < 2.5 || y > 120) continue;
     if (Math.abs(heightAt(x + 4, z) - y) + Math.abs(heightAt(x, z + 4) - y) > 4) continue;
-    if (FLATS.some((p) => Math.hypot(x - p.x, z - p.z) < 70) || runwayGap(x, z) < 25 || Math.hypot(x - LIGHTHOUSE.x, z - LIGHTHOUSE.z) < 25 || nearRoad(x, z)) continue;
+    if (FLATS.some((p) => Math.hypot(x - p.x, z - p.z) < 70) || runwayGap(x, z) < 25 || [LIGHTHOUSE, ...TOWERS].some((p) => Math.hypot(x - p.x, z - p.z) < 25) || nearRoad(x, z)) continue;
     const k = crop(x, z, y, 1) >= 0 ? (roll < 0.05 ? 3 : -1)           // farmland: the odd farmhouse
       : f >= 0.5 ? (roll < smooth(60, 15, y) * 0.6 ? 1 : 0)           // forest: broadleaf low down, conifers up high
       : y < 8 ? (roll < 0.5 ? 2 : -1)                                 // coast: palms
@@ -705,6 +705,127 @@ function buildLighthouse() {
   return g;
 }
 
+// ---- Island projects: bought in the hangar, built into the world (hidden until owned). ----
+
+// Where they go. The pond, workshop and fuel farm sit on the base's flat ground (pad-local, hangar side);
+// lookout towers on three high, flat-ish spots far apart; town refuel stations beside each town pad, clear of houses.
+export const POND = { ...padLocal(PAD, 8 * PAD.away, -42), y: PAD.y - 0.6, r: 9 }; // water surface a bucket can dip in
+const WORKSHOP = padLocal(PAD, 30 * PAD.away, 27), FUEL_FARM = padLocal(PAD, 28 * PAD.away, -36);
+export const TOWERS = (() => {
+  // Rank a grid of high, open spots (height minus roughness), then take the best three at least 450 m apart.
+  const cand = [], rng = mulberry32(SEED + 6);
+  for (let z = -900; z <= 900; z += 30) for (let x = -900; x <= 900; x += 30) {
+    const y = heightAt(x, z), legs = [[-2.4, -2.4], [2.4, -2.4], [-2.4, 2.4], [2.4, 2.4]].map(([dx, dz]) => heightAt(x + dx, z + dz));
+    const rough = Math.max(...legs) - Math.min(...legs);
+    if (y < 60 || y > 190 || rough > 3 || roadDist(x, z) < 30 || FLATS.some((p) => Math.hypot(p.x - x, p.z - z) < 250)) continue;
+    cand.push({ x, z, y: Math.min(...legs), score: y - rough * 15 });
+  }
+  const out = [];
+  for (const c of cand.sort((a, b) => b.score - a.score)) if (out.length < 3 && out.every((p) => Math.hypot(p.x - c.x, p.z - c.z) > 450)) out.push({ ...c, yaw: rng() * Math.PI * 2 });
+  return out;
+})();
+const STEEL = 0x5b5566, RED = 0xd8352a, YELLOW = 0xf2c230;
+
+// Town refuel station: slab, two tanks on cradles, a pump under a canopy.
+export function station(b) {
+  b.add(new THREE.BoxGeometry(7, 0.25, 5), 0x8f8790, 0, 0.12, 0);
+  for (const z of [-1.2, 1.2]) {
+    b.add(new THREE.CylinderGeometry(1, 1, 4, 10).rotateZ(Math.PI / 2), 0xf4ede4, -1.2, 1.35, z);
+    b.add(new THREE.CylinderGeometry(1.03, 1.03, 0.4, 10).rotateZ(Math.PI / 2), RED, -1.2, 1.35, z);
+    for (const x of [-2.6, 0.2]) b.add(new THREE.BoxGeometry(0.3, 0.5, 1.6), STEEL, x, 0.5, z);
+  }
+  b.add(new THREE.BoxGeometry(0.8, 1.4, 0.6), RED, 2.2, 0.95, 0);                 // pump
+  b.add(new THREE.BoxGeometry(0.5, 0.4, 0.05), 0xfff2b0, 2.2, 1.3, 0.33);
+  for (const z of [-1.8, 1.8]) b.add(new THREE.CylinderGeometry(0.08, 0.08, 3, 6), STEEL, 2.9, 1.6, z);
+  b.add(new THREE.BoxGeometry(2.4, 0.2, 4.4), 0xf6efe6, 2.6, 3.2, 0);              // canopy
+  b.add(new THREE.BoxGeometry(2.44, 0.12, 4.44), RED, 2.6, 3.0, 0);
+}
+// Base fire pond: stone rim, water a bucket can dip in, a pump house and a jetty.
+export function pond(b) {
+  b.add(new THREE.CylinderGeometry(POND.r + 0.6, POND.r + 0.9, 0.9, 20, 1, true), 0x8f8790, 0, 0.1, 0);
+  b.add(new THREE.CylinderGeometry(POND.r + 0.6, POND.r + 0.6, 0.15, 20), 0x8f8790, 0, 0.55, 0);
+  b.add(new THREE.CircleGeometry(POND.r, 20).rotateX(-Math.PI / 2), 0x3a8fa6, 0, -0.6, 0);
+  b.add(new THREE.CylinderGeometry(POND.r, POND.r, 1.6, 20, 1, true), 0x2d5f78, 0, -1.2, 0); // inner wall, seen through the water
+  b.add(new THREE.BoxGeometry(2.4, 2.2, 2.4), 0xf3e3c8, POND.r + 2.4, 1.1, 0);    // pump house
+  b.add(new THREE.CylinderGeometry(0, 2.1, 1, 4, 1).rotateY(Math.PI / 4), STEEL, POND.r + 2.4, 2.7, 0);
+  b.add(new THREE.CylinderGeometry(0.2, 0.2, 2.6, 6).rotateZ(Math.PI / 2), 0x2a2a32, POND.r + 0.4, 0.4, 0);
+}
+// Maintenance workshop: gabled shed with a roller door, an outdoor gantry over a parts stand, crates.
+export function workshop(b) {
+  const W = 10, D = 12, H = 4.5, CLAD = 0xe8c9a4;
+  b.add(new THREE.BoxGeometry(W + 8, 0.25, D + 2), 0x8f8790, 3, 0.12, 0);
+  b.add(new THREE.BoxGeometry(W, H, D), CLAD, 0, H / 2 + 0.25, 0);
+  for (let z = -D / 2 + 1; z < D / 2; z += 1.5) for (const sx of [-1, 1]) b.add(new THREE.BoxGeometry(0.1, H, 0.12), shade(CLAD, 0.85), sx * (W / 2 + 0.05), H / 2 + 0.25, z);
+  b.add(new THREE.ExtrudeGeometry(new THREE.Shape([new THREE.Vector2(-W / 2, 0), new THREE.Vector2(W / 2, 0), new THREE.Vector2(0, 2.2)]), { depth: D, bevelEnabled: false }), CLAD, 0, H + 0.25, -D / 2);
+  for (const sx of [-1, 1]) b.add(new THREE.BoxGeometry(5.9, 0.15, D + 0.8).rotateZ(-sx * 0.41), 0x8e3829, sx * 2.6, H + 1.45, 0);
+  b.add(new THREE.BoxGeometry(0.12, 3.4, 5), 0x9a8f96, W / 2 + 0.08, 1.95, 0);    // roller door
+  for (let y = 0.6; y < 3.6; y += 0.4) b.add(new THREE.BoxGeometry(0.15, 0.05, 5), 0x7d7480, W / 2 + 0.1, y, 0);
+  windowAt(b, 'z', 1, -2, 2.6, D / 2, 1.6, 1);
+  windowAt(b, 'z', -1, -2, 2.6, -D / 2, 1.6, 1);
+  for (const z of [-3, 3]) for (const x of [W / 2 + 1.5, W / 2 + 7]) b.add(new THREE.BoxGeometry(0.3, 5, 0.3), YELLOW, x, 2.75, z); // gantry
+  for (const z of [-3, 3]) b.add(new THREE.BoxGeometry(5.8, 0.4, 0.4), YELLOW, W / 2 + 4.25, 5.3, z);
+  b.add(new THREE.BoxGeometry(0.4, 0.5, 6.4), YELLOW, W / 2 + 4.25, 5.6, 0);
+  b.add(new THREE.CylinderGeometry(0.04, 0.04, 2, 4), 0x2a2a32, W / 2 + 4.25, 4.4, 0);
+  b.add(new THREE.BoxGeometry(1.6, 1.1, 1), STEEL, W / 2 + 4.25, 2.9, 0);         // an engine on the hoist
+  b.add(new THREE.BoxGeometry(1.8, 0.8, 1.2), 0x2f7c7a, W / 2 + 4.25, 0.65, 0);   // its stand
+  for (const [x, z, s] of [[W / 2 + 2, D / 2 - 1, 1], [W / 2 + 2.4, D / 2 - 2.4, 0.8], [-W / 2 - 1, -D / 2 + 1.5, 1.1]]) b.add(new THREE.BoxGeometry(s, s, s), 0xb8824c, x, s / 2 + 0.25, z);
+}
+// Fuel farm: a bunded yard of three horizontal tanks on saddles, a pipe manifold and a catwalk.
+export function fuelFarm(b) {
+  b.add(new THREE.BoxGeometry(18, 0.25, 12), 0x8f8790, 0, 0.12, 0);
+  for (const [w, d, x, z] of [[18, 0.4, 0, 6], [18, 0.4, 0, -6], [0.4, 12, 9, 0], [0.4, 12, -9, 0]]) b.add(new THREE.BoxGeometry(w, 1, d), 0x9a8f96, x, 0.6, z); // bund wall
+  for (const z of [-3.6, 0, 3.6]) {
+    b.add(new THREE.CylinderGeometry(1.5, 1.5, 12, 12).rotateZ(Math.PI / 2), 0xf4ede4, 0, 2.2, z);
+    for (const x of [-6, 6]) b.add(new THREE.SphereGeometry(1.5, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2).rotateZ(-Math.sign(x) * Math.PI / 2), 0xf4ede4, x, 2.2, z);
+    b.add(new THREE.CylinderGeometry(1.53, 1.53, 0.5, 12).rotateZ(Math.PI / 2), RED, 2, 2.2, z);
+    for (const x of [-4, 4]) b.add(new THREE.BoxGeometry(0.5, 1, 2.2), STEEL, x, 0.75, z);
+  }
+  b.add(new THREE.CylinderGeometry(0.15, 0.15, 10, 6).rotateX(Math.PI / 2), YELLOW, 8, 0.9, 0); // manifold
+  for (const z of [-3.6, 0, 3.6]) b.add(new THREE.CylinderGeometry(0.1, 0.1, 1.6, 6).rotateZ(Math.PI / 2), YELLOW, 7.2, 1.4, z);
+  b.add(new THREE.BoxGeometry(1, 0.1, 9), STEEL, -2, 3.9, 0);                     // catwalk over the tanks
+  for (const z of [-4.5, 4.5]) b.add(new THREE.BoxGeometry(0.06, 0.6, 0.06), STEEL, -2.45, 4.2, z);
+}
+// Fire lookout: a braced timber tower with a glazed cab, hip roof and a stair.
+export function lookout(b) {
+  const TIMBER = 0x7a5230, h = 11;
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+    strut(b, 0.18, TIMBER, [sx * 2.4, 0, sz * 2.4], [sx * 1.5, h, sz * 1.5]);
+    b.add(new THREE.BoxGeometry(0.8, 0.4, 0.8), 0x8f8790, sx * 2.4, 0.2, sz * 2.4);
+  }
+  for (const y of [3.5, 7]) for (const [a, c] of [[[-1, -1], [1, -1]], [[1, -1], [1, 1]], [[1, 1], [-1, 1]], [[-1, 1], [-1, -1]]]) {
+    const w = 2.4 - (0.9 * y) / h; strut(b, 0.08, TIMBER, [a[0] * w, y, a[1] * w], [c[0] * w, y + 3.5, c[1] * w]); // cross braces
+  }
+  b.add(new THREE.BoxGeometry(4, 0.3, 4), TIMBER, 0, h, 0);
+  b.add(new THREE.BoxGeometry(3.4, 1, 3.4), 0xe8c9a4, 0, h + 0.65, 0);
+  b.add(new THREE.BoxGeometry(3.3, 1.1, 3.3), GLASS, 0, h + 1.7, 0);
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) b.add(new THREE.BoxGeometry(0.16, 1.1, 0.16), TRIM, sx * 1.62, h + 1.7, sz * 1.62);
+  b.add(new THREE.CylinderGeometry(0, 3.1, 1.3, 4, 1).rotateY(Math.PI / 4), 0x8e3829, 0, h + 2.9, 0);
+  for (let i = 0; i < 4; i++) strut(b, 0.12, TIMBER, [2.8, i * 2.75, -1.6 + (i % 2) * 3.2], [2.8, (i + 1) * 2.75, 1.6 - (i % 2) * 3.2]); // zigzag stair
+}
+
+// Groups per project, hidden until owned (setProjects).
+const projectViews = {};
+function buildProjects(scene, houses) {
+  const mat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+  const place = (fill, at, y, yaw) => { const m = new THREE.Mesh(baked(fill), mat); m.position.set(at.x, y, at.z); m.rotation.y = yaw; return m; };
+  const group = (key, meshes) => { const g = new THREE.Group(); g.add(...meshes); g.visible = false; scene.add((projectViews[key] = g)); };
+  // Town stations: the spot 17 m from the pad farthest from the houses and the road.
+  group('stations', SITES.filter((s) => !s.hospital).map((s) => {
+    let best = null;
+    for (let a = 0; a < Math.PI * 2; a += Math.PI / 16) {
+      const x = s.x + Math.cos(a) * 17, z = s.z + Math.sin(a) * 17, d = Math.min(roadDist(x, z), ...houses.filter((h) => h.site === s).map((h) => Math.hypot(h.x - x, h.z - z)));
+      if (!best || d > best.d) best = { x, z, d, a };
+    }
+    return place(station, best, s.y, -best.a + Math.PI); // pump side faces the pad
+  }));
+  group('pond', [place(pond, POND, PAD.y, PAD.yaw)]);
+  group('workshop', [place(workshop, WORKSHOP, PAD.y, PAD.yaw + (PAD.away > 0 ? Math.PI : 0))]);
+  group('fuelFarm', [place(fuelFarm, FUEL_FARM, PAD.y, PAD.yaw)]);
+  group('towers', TOWERS.map((t) => place(lookout, t, t.y - 0.2, t.yaw)));
+  for (const t of TOWERS) (treeGrid[Math.floor((t.z + HALF) / TREE_CELL) * TREE_COLS + Math.floor((t.x + HALF) / TREE_CELL)] ||= []).push([t.x, t.z, t.y, 14, 3, -1, -1]);
+}
+export const setProjects = (owned) => { for (const [k, g] of Object.entries(projectViews)) g.visible = owned.includes(k); };
+
 export function buildWorld(scene) {
   scene.background = C.horizon;
   scene.fog = new THREE.Fog(C.horizon, 350, 2100);
@@ -719,5 +840,6 @@ export function buildWorld(scene) {
   scene.add(lighthouse, sun, sky, seabed, buildTerrain(), ...buildTrees(), buildRocks(), buildRoads(), water, buildPad(PAD, true), buildPad(DEPOT, false), buildRunway(), windsock);
   const houses = [];
   for (const site of SITES) buildSite(site, scene, houses);
+  buildProjects(scene, houses);
   return { sky, water, windsock, lighthouse, houses };
 }

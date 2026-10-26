@@ -23,7 +23,7 @@
     import { AIRFRAMES } from './src/career.js';
     import { buildBucketMesh, buildCrateMesh, buildHeavyMesh, buildHookMesh, buildPersonMesh } from './src/tools.js';
     import { bodyBaker } from './src/chopper.js';
-    import { hangar, hospital, house, mulberry32 } from './src/world.js';
+    import { fuelFarm, hangar, hospital, house, lookout, mulberry32, pond, station, workshop } from './src/world.js';
     const baked = (fill) => { const b = bodyBaker(); fill(b); return new THREE.Mesh(b.geometry(), new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true })); };
 
     const MODELS = {
@@ -33,6 +33,7 @@
       crate: buildCrateMesh, container: () => buildHeavyMesh('container'), vehicle: () => buildHeavyMesh('vehicle'),
       cabin: () => buildHeavyMesh('cabin'), person: buildPersonMesh,
       house: () => baked((b) => house(b, 6, 7, 0xe8c9a4, 0xb5523b, mulberry32(1))), hospital: () => baked(hospital), hangar: () => baked(hangar),
+      station: () => baked(station), pond: () => baked(pond), workshop: () => baked(workshop), fuelfarm: () => baked(fuelFarm), lookout: () => baked(lookout),
     };
     const name = new URLSearchParams(location.search).get('model') || 'plane';
     document.getElementById('ui').innerHTML = Object.keys(MODELS).map((k) => `<a href="?model=${k}">${k === name ? `<b>${k}</b>` : k}</a>`).join('') +
