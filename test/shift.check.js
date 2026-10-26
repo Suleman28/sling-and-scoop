@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { buildWorld, fuelAt, PAD } from '../src/world.js';
+import { RIG } from '../src/tools.js';
+import { buildWorld, fuelAt, PAD, SITES } from '../src/world.js';
 import { createFire, stepFire } from '../src/fire.js';
-import { comboMult, createDispatch, updateDispatch } from '../src/missions.js';
+import { accept, comboMult, createDispatch, disposeDispatch, updateDispatch } from '../src/missions.js';
 
 const scene = new THREE.Scene(), { houses } = buildWorld(scene);
 const idle = { pos: new THREE.Vector3(PAD.x, PAD.y, PAD.z), grounded: true };
@@ -47,5 +48,48 @@ console.log(`shift ok (ignored shift ends at ${a.t.toFixed(0)} s, ${a.stats.lost
   d.job = { id: 98, type: 'cargo', age: 0, crate: { held: true, hit: 0, pos: { x: 1e4, z: 1e4 } }, to: { x: 0, z: 0 } };
   updateDispatch(d, 5, idle, () => {});
   assert.equal(d.comboT, 10, 'window paused while on a job');
+}
+// Stories: finishing a step posts the next; steps the airframe can't do are skipped; props and loads are cleaned up.
+{
+  const hospital = SITES.find((x) => x.hospital);
+  const crash = (can) => { // first shift (by seed) whose opening call is a car crash
+    for (let seed = 1; seed < 500; seed++) {
+      const crates = [], d = createDispatch({ scene, fire: createFire(fuelAt, seed), houses, crates, can }, seed);
+      updateDispatch(d, 3.1, idle, () => {});
+      if (/Car crash/.test(d.calls[0]?.title)) return d;
+      disposeDispatch(d);
+    }
+  };
+  const lift = RIG.maxLift;
+  RIG.maxLift = RIG.vehicle.mass; // a Utility-class airframe
+  const d = crash(() => true), said = [];
+  assert.ok(d, 'found a car crash');
+  const first = d.calls[0], prop = first.prop;
+  assert.equal(first.story.of, 2);
+  accept(d, 0);
+  d.job.person.aboard = true;
+  updateDispatch(d, 0.1, { pos: new THREE.Vector3(hospital.x, 0, hospital.z), grounded: true }, (m) => said.push(m));
+  const wreck = d.calls[0];
+  assert.ok(!d.job && wreck && /Vehicle recovery/.test(wreck.title) && wreck.step === 2 && wreck.heavy, 'wreck recovery posted at once');
+  assert.equal(wreck.prop, prop, 'the crash car stays as the wreck');
+  assert.equal(d.crates.length, 0, 'casualty removed');
+  accept(d, 0);
+  assert.equal(d.job.bonus, 1.25, 'follow-up bonus when taken straight after');
+  assert.equal(d.props.length, 0, 'prop gone once the wreck is hooked');
+  assert.equal(d.crates.length, 1);
+  disposeDispatch(d);
+  assert.equal(d.crates.length, 0);
+  // Not enough lift: no wreck step. Scout (rescues only): same.
+  RIG.maxLift = 1.2;
+  for (const can of [() => true, (t) => t === 'rescue']) {
+    const e = crash(can);
+    assert.equal(e.calls[0].story.of, 1, 'story collapses to a single call');
+    accept(e, 0); e.job.person.aboard = true;
+    updateDispatch(e, 0.1, { pos: new THREE.Vector3(hospital.x, 0, hospital.z), grounded: true }, () => {});
+    assert.equal(e.calls.length, 0, 'no heavy follow-up');
+    assert.equal(e.props.length, 0, 'crash car removed');
+    disposeDispatch(e);
+  }
+  RIG.maxLift = lift;
 }
 console.log('shift variety ok');
