@@ -1,5 +1,5 @@
 import { TUNE } from './chopper.js';
-import { RIG } from './tools.js';
+import { bucketScale, RIG } from './tools.js';
 import { PLANE } from './plane.js';
 
 // Career: money, upgrades and airframes, saved in localStorage. Stats are applied by rewriting TUNE/RIG
@@ -10,11 +10,11 @@ const BASE_TUNE = { ...TUNE }, BASE_PLANE = { ...PLANE }, BASE_RIG = { ...RIG, b
 // so it only does rescues (land beside the casualty). The Water Bomber is a plane: fires only, and owning it brings major fires.
 export const AIRFRAMES = {
   scout: { kind: 'scout', name: 'Scout', cost: 0, tools: [], jobs: ['rescue'], blurb: 'Starter bubble two-seater: fast and nimble, no line, so rescues only', cam: 0.95, scale: 1.15, body: 0xf6d34a, trim: 0x2b2b33,
-    tune: { thrust: 2.3, drag2: 0.0017, yawRate: 1.9, climb: 16, burn: 1 / 620, loadClimb: 0.6 }, rig: { cap: 0.7, heliMass: 0.7, anchor: 0.6, maxLift: 0.8 } },
-  utility: { kind: 'utility', name: 'Utility', cost: 4000, tools: ['bucket', 'hook'], jobs: ['fire', 'cargo', 'rescue'], blurb: 'Bucket and hook: fights fires, slings cargo', cam: 1, scale: 1, body: 0xfff1d8, trim: 0x1d6a70,
-    tune: {}, rig: {} },
-  heavy: { kind: 'heavy', name: 'Heavy Lifter', cost: 10000, tools: ['bucket', 'hook'], jobs: ['fire', 'cargo', 'rescue'], blurb: 'Sky-crane: slow and thirsty, huge bucket, lifts containers, vehicles and cabins', cam: 1.25, scale: 0.85, body: 0xd8dde0, trim: 0xc8452e,
-    tune: { thrust: 1.7, drag2: 0.0026, yawRate: 1.1, climb: 11, burn: 1 / 450, loadClimb: 0.15 }, rig: { cap: 1.6, heliMass: 1.8, anchor: 2.45, maxLift: 2.6 } },
+    tune: { thrust: 2.3, drag2: 0.0017, yawRate: 1.9, climb: 16, burn: 1 / 620, loadClimb: 0.6, bank: 0.42, agility: 1.35 }, rig: { cap: 0.7, heliMass: 0.7, anchor: 0.6, maxLift: 0.8 } },
+  utility: { kind: 'utility', name: 'Utility', cost: 4000, tools: ['bucket', 'hook'], jobs: ['fire', 'cargo', 'rescue'], blurb: 'Bucket and hook: fights fires, slings cargo (can lug containers & vehicles slowly)', cam: 1, scale: 1, body: 0xfff1d8, trim: 0x1d6a70,
+    tune: {}, rig: { maxLift: 2.05 } },
+  heavy: { kind: 'heavy', name: 'Heavy Lifter', cost: 10000, tools: ['bucket', 'hook'], jobs: ['fire', 'cargo', 'rescue'], blurb: 'Sky-crane: slow and thirsty, 3× torrent bucket, lifts containers, vehicles and cabins', cam: 1.25, scale: 0.85, body: 0xd8dde0, trim: 0xc8452e,
+    tune: { thrust: 1.7, drag2: 0.0026, yawRate: 1.1, climb: 11, burn: 1 / 450, loadClimb: 0.15, bank: 0.26, agility: 0.68 }, rig: { cap: 2.8, waterMass: 0.25, heliMass: 1.8, anchor: 2.45, maxLift: 2.6 } },
   bomber: { kind: 'bomber', plane: true, name: 'Water Bomber', cost: 15000, tools: [], jobs: ['fire'], blurb: 'Twin-prop amphibian: flies from the airstrip, skims the sea to scoop 6× a bucket. Brings major wildfires', cam: 1.6, scale: 1, body: 0xf2c230, trim: 0xd8352a,
     tune: {}, rig: {} },
 };
@@ -29,7 +29,7 @@ export const UPGRADES = {
 
 const KEY = 'rotor-relay-career';
 export function newCareer() {
-  return { bank: 0, levels: { bucket: 0, line: 0, power: 0, fuel: 0 }, owned: ['scout'], airframe: 'scout', best: 0, daily: {} };
+  return { bank: 0, levels: { bucket: 0, line: 0, power: 0, fuel: 0 }, owned: ['scout'], airframe: 'scout', best: 0 };
 }
 
 // storage: anything with getItem/setItem (localStorage in the browser). Storage can be missing or blocked.
@@ -58,7 +58,8 @@ export function applyLoadout(c) {
   PLANE.tank *= 1 + 0.3 * L.bucket;
   PLANE.thrust *= 1 + 0.07 * L.power;
   PLANE.burn /= 1 + 0.3 * L.fuel;
-  RIG.bucket.hang = BASE_RIG.bucket.hang * Math.cbrt(RIG.cap); // bigger bucket hangs lower
+  RIG.bucket.hang = BASE_RIG.bucket.hang * bucketScale(RIG.cap); // bigger bucket hangs lower
+  RIG.bucket.radius = BASE_RIG.bucket.radius * bucketScale(RIG.cap);
   RIG.bucket.line += 2.5 * L.line;
   RIG.hook.line += 2.5 * L.line;
 }
@@ -85,13 +86,8 @@ export function buyOrSelectAirframe(c, key) {
 }
 
 // End of shift: bank the pay and record bests. Returns true for a new best.
-export function recordShift(c, earned, dailyDate) {
+export function recordShift(c, earned) {
   c.bank += earned;
-  if (dailyDate) {
-    const best = earned > (c.daily[dailyDate] || 0);
-    if (best) c.daily[dailyDate] = earned;
-    return best;
-  }
   const best = earned > c.best;
   if (best) c.best = earned;
   return best;

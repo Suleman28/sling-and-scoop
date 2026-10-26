@@ -21,13 +21,18 @@
     import { buildChopper } from './src/chopper.js';
     import { buildPlane } from './src/plane.js';
     import { AIRFRAMES } from './src/career.js';
-    import { buildCrateMesh, buildHeavyMesh, buildPersonMesh } from './src/tools.js';
+    import { buildBucketMesh, buildCrateMesh, buildHeavyMesh, buildHookMesh, buildPersonMesh } from './src/tools.js';
+    import { bodyBaker } from './src/chopper.js';
+    import { hospital, house, mulberry32 } from './src/world.js';
+    const baked = (fill) => { const b = bodyBaker(); fill(b); return new THREE.Mesh(b.geometry(), new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true })); };
 
     const MODELS = {
       scout: () => buildChopper(AIRFRAMES.scout).group, utility: () => buildChopper(AIRFRAMES.utility).group,
       heavy: () => buildChopper(AIRFRAMES.heavy).group, plane: () => buildPlane(AIRFRAMES.bomber).group,
+      bucket: buildBucketMesh, hook: buildHookMesh,
       crate: buildCrateMesh, container: () => buildHeavyMesh('container'), vehicle: () => buildHeavyMesh('vehicle'),
       cabin: () => buildHeavyMesh('cabin'), person: buildPersonMesh,
+      house: () => baked((b) => house(b, 6, 7, 0xe8c9a4, 0xb5523b, mulberry32(1))), hospital: () => baked(hospital),
     };
     const name = new URLSearchParams(location.search).get('model') || 'plane';
     document.getElementById('ui').innerHTML = Object.keys(MODELS).map((k) => `<a href="?model=${k}">${k === name ? `<b>${k}</b>` : k}</a>`).join('') +

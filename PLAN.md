@@ -1,5 +1,39 @@
 # Plan: "Dispatch" — low-poly helicopter rescue/cargo game (browser)
 
+## Resolved decisions (Phase 6a: menus, free roam, living island)
+- **Menus:** start menu over a slow orbit of the parked aircraft: 1 Start shift, 2 Free roam, 3 Hangar (click or key). Esc pauses (freezes the shift clock): resume, hangar (at base, or anywhere in free roam), end shift (banks earnings) or main menu. The HUD only shows while flying.
+- **Daily shift removed:** without a shared leaderboard it played the same as a normal shift. Bring it back alongside a leaderboard if one is ever added.
+- **Free roam:** no calls, unlimited fuel, fires out, hangar from anywhere.
+- **Terrain:** crag detail on high ground and lumps on the lowland (added after the flats/runway are placed); depth-shaded shallows (water opacity 0.78), a surf line, varied beaches, banded cliffs, lusher valleys, forest floor under the woods and crop patchwork on flat lowland.
+- **Scenery:** four instanced kinds sharing the tree collision/fire grid: conifers, broadleaf, palms on the coast and farmhouses in the fields (they char too). Boulders, and a lighthouse with a sweeping beam on the headland farthest from base. Runway markings are merged into one mesh (about 55 fewer draw calls).
+- **One airfield:** the helipad, hangar, fuel and ops hut sit on an apron beside the landward end of the airstrip (where the bomber starts), joined to it by a taxiway. The old standalone coastal pad is gone; `COAST` only supplies the base height the runway was searched at. Town sites didn't move.
+- **Roads:** a minimum spanning tree over base and the four towns. Each link is routed by A* on a 20 m grid (grade² cost, no sea, off the runway), then Chaikin-smoothed and draped as one ribbon mesh. Trees and rocks keep clear.
+- **Buildings:** houses are built in the prefab cabin's style (plank bands, corner posts, framed windows, door and porch facing the pad, overhanging seamed roof, ridge beam, chimney). There's a two-storey hospital, and farmhouses reuse the house with a barn. Each town building is one merged mesh with its own material, so fire chars it by tinting.
+- **Lighthouse:** at the tip of a stone breakwater off low coast (it ended up on the depot islet). It's a sector light, so the beam fades while it points back over land.
+- **Audio:** the turbine whine only plays while pulling power (never at idle or in a hover), and the piston Scout has none.
+- **Roads v2:** the A* path is string-pulled into straights, corner-rounded, and drawn as one continuous mitred strip per road (no per-segment quads). The grade penalty is softer, so there are fewer hairpins. The base apron and other towns' pads are no-go for the router; the base road ends at a gate behind the apron with a short spur onto it. Town houses shuffle round their ring to clear the road.
+- **Missions v2:**
+  - Wildfire size is capped by the water per load of the aircraft you're flying, not by owning the bomber: Wildfire (Utility), Large (Heavy Lifter, ≥2), Major (bomber or maxed Heavy, ≥5).
+  - New fires: house fires (a house is lost after 75 s in full flame; this also applies when a wildfire reaches town) and car fires on roads.
+  - New rescues: car crashes on roads (with a wreck) and patient transfers from a town to the hospital.
+  - Cargo is named for where it's going: medical goods to the hospital, groceries, materials etc. to towns, parts to base. Medical goods are fragile. Heavy jobs make sense too: wrecks off the road to base, containers and cabins from base to towns.
+- **Chain:** the window (60 s) is for taking the next call, and it only runs while you're free and calls are waiting. Travel time on a job no longer counts. Abandoning breaks the chain.
+- **Compass:** a tape across the top of the HUD with the objective as a coloured marker (pinned to the edge with ◀/▶ when behind you) and its distance. It replaces the 3D arrow over the aircraft.
+- **Ambient life (`life.js`):** drifting clouds at 280–440 m, gull flocks over the towns and lighthouse, sailboats looping through open water. Decoration only, one draw call each.
+
+## Resolved decisions (Phase 5.6: aircraft, tool & load polish, physics & audio)
+- **Aircraft models & animations:**
+  - **Scout:** full glass bubble canopy, exposed flat-six piston engine with twin exhausts, saddle fuel tanks, 3-longeron welded-tube truss tail boom with exposed driveshaft, dorsal/ventral fins, and a 2-blade teetering rotor with flybar paddles.
+  - **Utility:** stepped forward nose below a wide wraparound windshield with aligned side/rear cabin windows, turboshaft doghouse cowling with twin intakes and exhausts, driveshaft spine, tail gearbox and stinger. Base `maxLift` raised to `2.05` so it can lug containers (`1.6`) and wrecked vehicles (`2.0`) slowly under noticeable strain.
+  - **Heavy Lifter:** Sikorsky-style Sky-Crane with flush cab-to-spine roofline, rear-facing crane-operator window, two-tier structural crane spine, central gearbox flanked by twin turboshafts, belly winch housing, and tricycle portal gantry gear. Carries a 2.8× torrent bucket (`cap: 2.8`, scaling up to `5.32` with upgrades).
+  - **Water Bomber:** stepped bow deck (`y = 2.38` stepping up `+1.15 m` into a forward-facing windshield), forward-tapered engine nacelles with 4-blade yellow-tipped props, V-strut wingtip floats, dorsal fin fillet, tailplane bullet fairing, and inward-retracting amphibious tricycle landing gear (`s.gear`).
+- **Flight & rig physics:**
+  - **Helicopters:** per-airframe `agility`, ground-effect cushion (IGE), translational lift (ETL), crosswind weathercocking, braking flare, heavy-load `strain` scaling, swinging-load attitude tug, rotor spooling on pads, and cyclic rotor disc tilt.
+  - **Water Bomber:** water-payload weight penalty on climb/acceleration and stall speed, upward lift ballooning when dumping water, wing-in-ground-effect cushion (`wig`), induced bank drag, and dihedral rudder-roll coupling.
+  - **Bucket & Hook:** collapsible Bambi Bucket expands radially (`0.62×` empty to `1.08×` full) as it fills and scales physically with `RIG.cap` (`bucketScale`: `0.72×` starter up to `1.90×` on a maxed Heavy Lifter). Unloaded hook can reel all the way in (`0.1 m`, `stowed` against the belly), tool swaps (`R`) preserve rope length, and winch extension advances `r.pos` along the rope so paying out line is smooth.
+  - **Cargo & rescue load models:** `crate`, `container`, `vehicle`, `cabin`, and `person` (plus boater raft) baked into single-draw-call `bodyBaker()` meshes with 3D shackles, slings, and spreader bars.
+- **Audio:** distinct synth rotor voices per helicopter (`scout`, `utility`, `heavy`) with pad idle-down and bank blade-slap; warm twin-prop synth harmony layered under low-pass filtered `airplane_prop.wav`; water-scooping/dipping spray loop; and procedural action SFX (`hook`, `release`, `swap`, `dump`, `accept`, `done`).
+
 ## Resolved decisions (Phase 1)
 - **Name:** *Rotor Relay* (island: unnamed for now). Chaining dispatches = the relay; avoids "Dispatch", which is an existing game title.
 - **Map:** one main island (~1.8 km across, bays + central ridges) plus three islets, on a 2.8 km square terrain with 10 m cells (157k tris, one draw call). Fixed map seed `1337` so the career island stays learnable.

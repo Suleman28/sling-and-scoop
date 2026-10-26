@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { reflect } from './chopper.js';
+import { bodyBaker, GLASS, reflect } from './chopper.js';
 
 export const SEED = 1337;           // fixed map seed: the career island stays learnable
 export const SIZE = 2800;           // terrain square, metres
@@ -53,9 +53,9 @@ function rawHeight(x, z) {
   return FLOOR + mask * 22 + e * e * 240 * mask;
 }
 
-// Home pad: a low stretch of main-island coast, nose out to sea toward the sunset.
+// Base height: a low stretch of main-island coast facing the sunset (the airstrip below was searched at this height).
 export const SUN_DIR = new THREE.Vector3(-0.75, 0.22, -0.62).normalize();
-export const PAD = (() => {
+const COAST = (() => {
   let best = null;
   for (let a = 0; a < Math.PI * 2; a += 0.05) {
     const dx = Math.cos(a), dz = Math.sin(a);
@@ -69,8 +69,26 @@ export const PAD = (() => {
   return best;
 })();
 
+// Airstrip for the water bomber: the straight 520 m strip near base needing the least cut-and-fill, found by a
+// one-off search over this (fixed-seed) map. About a third of it is reclaimed from the sea, built up to base height.
+// Takeoff runs toward the sea end so you climb out over water.
+export const RUNWAY = (() => {
+  const x = -358, z = -625, a = 1.7, len = 520, width = 30, dx = Math.sin(a), dz = Math.cos(a);
+  const seaward = rawHeight(x + dx * 250, z + dz * 250) < rawHeight(x - dx * 250, z - dz * 250) ? 1 : -1;
+  const fx = dx * seaward, fz = dz * seaward; // takeoff direction
+  return { x, z, dx, dz, len, width, fx, fz, y: COAST.y, yaw: Math.atan2(-fx, -fz), start: { x: x - fx * (len / 2 - 30), z: z - fz * (len / 2 - 30) } };
+})();
+// Home base: helipad, hangar and fuel on an apron beside the landward end of the airstrip, where the bomber starts
+// its run, joined to the runway by a taxiway. away = which side of the pad (+1 right, -1 left) faces away from the runway.
+export const PAD = (() => {
+  const R = RUNWAY, px = -R.dz, pz = R.dx; // across the runway
+  const side = rawHeight(R.x + px * 100, R.z + pz * 100) > rawHeight(R.x - px * 100, R.z - pz * 100) ? 1 : -1, o = (R.width / 2 + 38) * side;
+  const x = R.start.x + R.fx * 80 + px * o, z = R.start.z + R.fz * 80 + pz * o;
+  return { x, z, y: R.y, yaw: R.yaw, away: Math.sign(Math.cos(R.yaw) * px * side - Math.sin(R.yaw) * pz * side) };
+})();
+
 // Fuel depot on the big western islet: the only other place to refuel.
-const DEPOT = { x: ISLETS[0][0], z: ISLETS[0][1], y: Math.max(4, rawHeight(ISLETS[0][0], ISLETS[0][1])), yaw: PAD.yaw };
+const DEPOT = { x: ISLETS[0][0], z: ISLETS[0][1], y: Math.max(4, rawHeight(ISLETS[0][0], ISLETS[0][1])), yaw: PAD.yaw, away: -1 };
 export const PADS = [PAD, DEPOT];
 
 // Destinations on the main island: a hospital and three towns, each with a landing pad, spread apart on flat ground.
@@ -86,15 +104,6 @@ export const SITES = (() => {
 })();
 export const BASE = { ...PAD, name: 'Base' };
 
-// Airstrip for the water bomber: the straight 520 m strip near base needing the least cut-and-fill, found by a
-// one-off search over this (fixed-seed) map. About a third of it is reclaimed from the sea, built up to pad height.
-// Takeoff runs toward the sea end so you climb out over water.
-export const RUNWAY = (() => {
-  const x = -358, z = -625, a = 1.7, len = 520, width = 30, dx = Math.sin(a), dz = Math.cos(a);
-  const seaward = rawHeight(x + dx * 250, z + dz * 250) < rawHeight(x - dx * 250, z - dz * 250) ? 1 : -1;
-  const fx = dx * seaward, fz = dz * seaward; // takeoff direction
-  return { x, z, dx, dz, len, width, y: PAD.y, yaw: Math.atan2(-fx, -fz), start: { x: x - fx * (len / 2 - 30), z: z - fz * (len / 2 - 30) } };
-})();
 // Distance outside the runway rectangle (0 inside), expanded by margin.
 const runwayGap = (x, z, margin = 0) => {
   const rx = x - RUNWAY.x, rz = z - RUNWAY.z, t = rx * RUNWAY.dx + rz * RUNWAY.dz, o = -rx * RUNWAY.dz + rz * RUNWAY.dx;
@@ -109,6 +118,8 @@ export const padLocal = (pad, lx, lz) => ({ x: pad.x + Math.cos(pad.yaw) * lx + 
 
 function height(x, z) {
   let y = rawHeight(x, z);
+  // Craggy detail up high and gentle lumps on the lowland, so long slopes break into facets.
+  y += (noise(x / 48 + 3, z / 48 - 8, 3) - 0.5) * 16 * smooth(40, 140, y) + (noise(x / 90 - 6, z / 90 + 2, 2) - 0.5) * 5 * smooth(2, 25, y);
   for (const p of FLATS) { const t = smooth(70, 32, Math.hypot(x - p.x, z - p.z)); y = y * (1 - t) + p.y * t; }
   const r = smooth(60, 0, runwayGap(x, z, 8)); // airstrip apron, blending into the land (or rising out of the sea) over 60 m
   return y * (1 - r) + RUNWAY.y * r;
@@ -131,26 +142,150 @@ export function heightAt(x, z) {
 
 export const groundAt = (x, z) => Math.max(heightAt(x, z), SEA);
 
+// Roads: a minimum spanning tree over the base gate and the towns, each link routed by A* over a 20 m grid that prefers
+// gentle, low ground and keeps out of the sea and off the runway. The grid path is then string-pulled into long straights
+// (where the straight line stays on land at a gentle grade), corner-rounded, resampled every 4 m, and given a smoothed
+// height profile that the terrain is cut to (the road bed).
+const RC = 20, RN = SIZE / RC, rcx = (i) => ((i % RN) + 0.5) * RC - HALF, rcz = (i) => (Math.floor(i / RN) + 0.5) * RC - HALF;
+// No-go for roads: the base apron, and the pads of towns this road isn't going to.
+const offLimits = (x, z, a, b) => Math.hypot(x - PAD.x, z - PAD.z) < 46 || SITES.some((p) => p !== a && p !== b && Math.hypot(x - p.x, z - p.z) < 30);
+function route(a, b) {
+  const cell = (p) => Math.floor((p.z + HALF) / RC) * RN + Math.floor((p.x + HALF) / RC), start = cell(a), goal = cell(b);
+  const g = new Float32Array(RN * RN).fill(Infinity), from = new Int32Array(RN * RN).fill(-1), heap = [[0, start]];
+  const push = (n) => { heap.push(n); for (let i = heap.length - 1, p; i && heap[(p = (i - 1) >> 1)][0] > heap[i][0]; i = p) [heap[i], heap[p]] = [heap[p], heap[i]]; };
+  const pop = () => {
+    const top = heap[0], last = heap.pop();
+    if (heap.length) { heap[0] = last; for (let i = 0; ;) { let m = i; for (const c of [2 * i + 1, 2 * i + 2]) if (c < heap.length && heap[c][0] < heap[m][0]) m = c; if (m === i) break; [heap[i], heap[m]] = [heap[m], heap[i]]; i = m; } }
+    return top;
+  };
+  g[start] = 0;
+  while (heap.length) {
+    const [, i] = pop();
+    if (i === goal) break;
+    const y = heightAt(rcx(i), rcz(i));
+    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+      const ix = (i % RN) + dx, iz = Math.floor(i / RN) + dz, j = iz * RN + ix;
+      if ((!dx && !dz) || ix < 0 || iz < 0 || ix >= RN || iz >= RN) continue;
+      const x = rcx(j), z = rcz(j), ny = heightAt(x, z), len = Math.hypot(dx, dz) * RC, grade = Math.abs(ny - y) / len;
+      if ((ny < 1.5 || offLimits(x, z, a, b)) && j !== goal) continue;
+      const cost = g[i] + len * (1 + grade * grade * 120 + Math.max(0, ny - 70) * 0.03) * (runwayGap(x, z) < 12 ? 40 : 1);
+      if (cost < g[j]) { g[j] = cost; from[j] = i; push([cost + Math.hypot(x - b.x, z - b.z), j]); }
+    }
+  }
+  let pts = [];
+  for (let i = goal; i >= 0; i = from[i]) pts.push([rcx(i), rcz(i)]);
+  pts.reverse();
+  pts[0] = [a.x, a.z]; pts[pts.length - 1] = [b.x, b.z];
+  const clear = ([x0, z0], [x1, z1]) => {
+    const n = Math.ceil(Math.hypot(x1 - x0, z1 - z0) / 5);
+    for (let i = 0, py = heightAt(x0, z0); i <= n; i++) {
+      const x = x0 + ((x1 - x0) * i) / n, z = z0 + ((z1 - z0) * i) / n, y = heightAt(x, z);
+      if ((y < 1.5 && i && i < n) || runwayGap(x, z) < 12 || offLimits(x, z, a, b) || Math.abs(y - py) > 0.6) return false;
+      py = y;
+    }
+    return true;
+  };
+  const pulled = [pts[0]];
+  for (let i = 0; i < pts.length - 1;) {
+    let j = Math.min(pts.length - 1, i + 40);
+    while (j > i + 1 && !clear(pts[i], pts[j])) j--;
+    pulled.push(pts[(i = j)]);
+  }
+  pts = pulled;
+  for (let k = 0; k < 4; k++) pts = [pts[0], ...pts.slice(0, -1).flatMap(([x0, z0], i) => { const [x1, z1] = pts[i + 1]; return [[x0 * 0.75 + x1 * 0.25, z0 * 0.75 + z1 * 0.25], [x0 * 0.25 + x1 * 0.75, z0 * 0.25 + z1 * 0.75]]; }), pts[pts.length - 1]]; // Chaikin
+  const out = [];
+  for (let i = 0, carry = 0; i < pts.length - 1; i++) {
+    const [x0, z0] = pts[i], [x1, z1] = pts[i + 1], d = Math.hypot(x1 - x0, z1 - z0);
+    for (let t = carry; t < d; t += 4) out.push([x0 + ((x1 - x0) * t) / d, z0 + ((z1 - z0) * t) / d]);
+    carry = (4 - ((d - carry) % 4)) % 4;
+  }
+  // Trim where the road reaches a town pad.
+  return out.filter(([x, z]) => [a, b].every((p) => !p.name || Math.hypot(x - p.x, z - p.z) > PAD_RADIUS + 1));
+}
+const GATE = padLocal(PAD, 10 * PAD.away, 52); // just past the back of the apron, on the hangar side
+export const ROADS = (() => {
+  const nodes = [GATE, ...SITES], inTree = [nodes[0]], roads = [];
+  while (inTree.length < nodes.length) { // Prim's
+    let best = null;
+    for (const a of inTree) for (const b of nodes) if (!inTree.includes(b)) { const d = Math.hypot(a.x - b.x, a.z - b.z); if (!best || d < best.d) best = { a, b, d }; }
+    inTree.push(best.b);
+    const r = route(best.a, best.b), spur = [...Array(6)].map((_, i) => { const p = padLocal(PAD, 10 * PAD.away, 28 + i * 4); return [p.x, p.z]; }); // apron edge to the gate
+    roads.push(best.a === GATE ? [...spur, ...r] : best.b === GATE ? [...r, ...spur.reverse()] : r);
+  }
+  // Road bed: average each road's height over ±24 m, then pull terrain vertices within 16 m onto it.
+  const target = new Map();
+  for (const r of roads) {
+    const ys = r.map(([x, z]) => heightAt(x, z));
+    r.forEach((p, i) => { let t = 0, n = 0; for (let k = Math.max(0, i - 6); k <= Math.min(r.length - 1, i + 6); k++) { t += ys[k]; n++; } p[2] = t / n; });
+    for (const [x, z, y] of r) {
+      const i0 = Math.round((x + HALF) / CELL), j0 = Math.round((z + HALF) / CELL);
+      for (let j = j0 - 2; j <= j0 + 2; j++) for (let i = i0 - 2; i <= i0 + 2; i++) {
+        const d = Math.hypot(i * CELL - HALF - x, j * CELL - HALF - z), k = j * (SEGS + 1) + i, old = target.get(k);
+        if (d < 16 && (!old || d < old.d)) target.set(k, { d, y });
+      }
+    }
+  }
+  for (const [k, { d, y }] of target) { const t = smooth(16, 8, d); H[k] = H[k] * (1 - t) + y * t; }
+  return roads;
+})();
+export const roadDist = (x, z) => Math.min(...ROADS.flat().map(([rx, rz]) => Math.hypot(rx - x, rz - z)));
+const roadCells = new Set(ROADS.flat().map(([x, z]) => `${Math.floor(x / 10)},${Math.floor(z / 10)}`));
+const nearRoad = (x, z) => [[0, 0], [10, 0], [-10, 0], [0, 10], [0, -10]].some(([dx, dz]) => roadCells.has(`${Math.floor((x + dx) / 10)},${Math.floor((z + dz) / 10)}`));
+
+function buildRoads() {
+  // One continuous strip per road: each point's edge pair sits across the averaged direction, so bends join cleanly.
+  const pos = [];
+  for (const r of ROADS) {
+    const edges = r.map(([x, z, y], i) => {
+      const [ax, az] = r[Math.max(0, i - 1)], [bx, bz] = r[Math.min(r.length - 1, i + 1)], d = Math.hypot(bx - ax, bz - az) || 1, nx = (-(bz - az) / d) * 3, nz = ((bx - ax) / d) * 3;
+      return [[x - nx, z - nz], [x + nx, z + nz]].map(([ex, ez]) => [ex, Math.max(y, heightAt(ex, ez)) + 0.25, ez]);
+    });
+    for (let i = 0; i < edges.length - 1; i++) {
+      const [a, b] = edges[i], [c, e] = edges[i + 1];
+      pos.push(...a, ...b, ...e, ...a, ...e, ...c);
+    }
+  }
+  const g = new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.computeVertexNormals();
+  return new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color: 0x6a6070, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+}
+
 // Warm-dusk palette.
 const C = {
-  seabed: new THREE.Color(0xb98e6e), sand: new THREE.Color(0xeccb9c),
-  grass: new THREE.Color(0x86a052), dry: new THREE.Color(0xbfae5e),
-  rock: new THREE.Color(0x8d7584), peak: new THREE.Color(0xf3e1d2),
-  tree: new THREE.Color(0x3f6b3c), water: 0x3a8fa6,
+  seabed: new THREE.Color(0xb98e6e), shallow: new THREE.Color(0xe2cf9e), reef: new THREE.Color(0x5fae9e), deep: new THREE.Color(0x2d5f78),
+  foam: new THREE.Color(0xf6efe2), sand: new THREE.Color(0xeccb9c),
+  lush: new THREE.Color(0x6e9a48), grass: new THREE.Color(0x86a052), dry: new THREE.Color(0xbfae5e), forest: new THREE.Color(0x56763a),
+  rock: new THREE.Color(0x8d7584), rock2: new THREE.Color(0xa88e88), peak: new THREE.Color(0xf3e1d2), water: 0x3a8fa6,
   skyTop: new THREE.Color(0x2e3170), horizon: new THREE.Color(0xf2a07a), sun: new THREE.Color(0xffe2a8),
 };
 export const FOG = C.horizon;
 
+// Forest cover (trees where > 0.5) and farmland: a patchwork of rotated plots on flat lowland outside the forests.
+const forest = (x, z) => noise(x / 220 + 40, z / 220 - 9, 3);
+const CROPS = [0xe0c05a, 0x9fbf5a, 0x7fa84a, 0xc9c26a, 0xd6a24e].map((c) => new THREE.Color(c));
+function crop(x, z, y, ny) {
+  if (y < 4 || y > 70 || ny < 0.93 || forest(x, z) > 0.45 || noise(x / 300 - 31, z / 300 + 17, 2) < 0.5) return -1;
+  const i = Math.floor((x * 0.8 + z * 0.6) / 55), j = Math.floor((z * 0.8 - x * 0.6) / 40);
+  return Math.floor(noise(i * 3, j * 5, 1) * CROPS.length);
+}
+
 function biome(y, ny, x, z, out) {
-  if (y < SEA - 1.5) out.copy(C.seabed);
-  else if (y < SEA + 2.2) out.copy(C.sand);
-  else if (y > 185) out.copy(C.peak);
-  else if (ny < 0.72 || y > 140) out.copy(C.rock);
-  else out.copy(C.grass).lerp(C.dry, smooth(0.4, 0.7, noise(x / 160 - 20, z / 160 + 4, 2)));
+  const c = crop(x, z, y, ny);
+  if (y < SEA - 0.6) out.copy(C.shallow).lerp(C.reef, smooth(-0.6, -5, y)).lerp(C.deep, smooth(-5, -16, y)); // shallows glow through the water
+  else if (y < SEA + 0.5) out.copy(C.foam);                                                                  // surf line where the waves lap
+  else if (y < SEA + 1.2 + 2.4 * noise(x / 90 + 13, z / 90, 2) && ny > 0.8) out.copy(C.sand);
+  else if (y > 185 + 20 * noise(x / 70, z / 70, 2)) out.copy(C.peak);
+  else if (ny < 0.72 || y > 140) out.copy(C.rock).lerp(C.rock2, Math.sin(y * 0.45 + noise(x / 60, z / 60, 1) * 5) > 0.2 ? 0.7 : 0); // banded cliffs
+  else if (c >= 0) out.copy(CROPS[c]);
+  else {
+    out.copy(C.grass).lerp(C.lush, smooth(40, 5, y) * 0.8).lerp(C.dry, smooth(0.4, 0.7, noise(x / 160 - 20, z / 160 + 4, 2)));
+    if (forest(x, z) >= 0.5 && y > 3 && y < 120) out.lerp(C.forest, 0.75); // forest floor, so woods read as masses
+  }
   return out.multiplyScalar(0.94 + Math.random() * 0.1);
 }
 
-let terrain, trees, terrainColors, treeColors; // kept for scorching and resetting
+let terrain, terrainColors; // kept for scorching and resetting
+const treeMeshes = [];
 
 function buildTerrain() {
   const n = SEGS * SEGS * 6, pos = new Float32Array(n * 3), col = new Float32Array(n * 3);
@@ -173,7 +308,7 @@ function buildTerrain() {
   return (terrain = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true })));
 }
 
-// Trees as cones in a 20 m grid (same cells as the fire sim): [x, z, baseY, height, radius, instance].
+// Trees (and farmhouses) as cones in a 20 m grid (same cells as the fire sim): [x, z, baseY, height, radius, kind, instance].
 const TREE_CELL = 20, TREE_COLS = Math.ceil(SIZE / TREE_CELL), treeGrid = [];
 // Pushes a body of `radius` out of any tree cone, sampled at height pos.y + dy; returns the closing speed.
 // Defaults fit the chopper (skid-to-belly height).
@@ -193,25 +328,77 @@ export function hitTrees(pos, vel, radius = 1.8, dy = 0.8) {
   return hit;
 }
 
+// Instanced kinds, one draw call each: { geometry, collision height and radius, max count }.
+function treeKinds() {
+  const TRUNK = 0x6b4a3a, kind = (fill, h, r, max) => { const b = bodyBaker(); fill(b); return { geo: b.geometry(), h, r, max, list: [] }; };
+  return [
+    kind((b) => { // conifer
+      b.add(new THREE.CylinderGeometry(0.25, 0.35, 2, 5), TRUNK, 0, 1, 0);
+      b.add(new THREE.ConeGeometry(2.6, 6, 6), 0x3f6b3c, 0, 4.5, 0);
+      b.add(new THREE.ConeGeometry(1.8, 4.5, 6), 0x4a7a44, 0, 7, 0);
+    }, 9, 2.6, 2600),
+    kind((b) => { // broadleaf
+      b.add(new THREE.CylinderGeometry(0.3, 0.45, 3.4, 5), TRUNK, 0, 1.7, 0);
+      b.add(new THREE.IcosahedronGeometry(2.8, 0).scale(1, 0.8, 1), 0x5f8f3e, 0, 5, 0);
+      b.add(new THREE.IcosahedronGeometry(1.9, 0), 0x78a24c, 1.3, 6.4, 0.6);
+    }, 8, 3, 1600),
+    kind((b) => { // palm: leaning trunk, six drooping fronds
+      b.add(new THREE.CylinderGeometry(0.2, 0.32, 7.5, 5).rotateZ(0.12), 0x9a7a55, -0.45, 3.7, 0);
+      for (let k = 0; k < 6; k++) b.add(new THREE.ConeGeometry(0.55, 4, 3).rotateZ(-Math.PI / 2 - 0.45).translate(1.8, -0.8, 0).rotateY((k * Math.PI) / 3 + 0.3), k % 2 ? 0x4f8a3e : 0x5f9a46, -0.9, 7.4, 0);
+    }, 8, 1.6, 400),
+    kind((b) => { // farmhouse with a barn
+      house(b, 6, 8, 0xf0e2c8, 0xb5523b, mulberry32(9));
+      b.add(new THREE.BoxGeometry(5, 4.2, 6), 0xa8443a, 7.5, 2.1, 1);
+      for (let y = 0.8; y < 4; y += 0.7) b.add(new THREE.BoxGeometry(5.06, 0.06, 6.06), 0x8a3730, 7.5, y, 1);
+      b.add(new THREE.BoxGeometry(0.08, 3, 2.6), TRIM, 10.03, 1.5, 1);
+      b.add(new THREE.CylinderGeometry(0, 3.8, 2, 4, 1).rotateY(Math.PI / 4).scale(0.95, 1, 1.15), 0x5b5566, 7.5, 5.2, 1);
+    }, 7, 5, 60),
+  ];
+}
+
 function buildTrees() {
-  const rng = mulberry32(SEED + 1), geo = new THREE.ConeGeometry(2.6, 9, 5).translate(0, 4, 0);
-  const mesh = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ flatShading: true }), 3500);
-  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0), col = new THREE.Color();
-  let count = 0;
-  for (let tries = 0; tries < 60000 && count < mesh.count; tries++) {
-    const x = (rng() - 0.5) * SIZE, z = (rng() - 0.5) * SIZE, y = heightAt(x, z);
-    if (y < 4 || y > 120 || noise(x / 220 + 40, z / 220 - 9, 3) < 0.5) continue;
+  const rng = mulberry32(SEED + 1), kinds = treeKinds();
+  for (let tries = 0; tries < 90000; tries++) {
+    const x = (rng() - 0.5) * SIZE, z = (rng() - 0.5) * SIZE, y = heightAt(x, z), roll = rng(), f = forest(x, z);
+    if (y < 2.5 || y > 120) continue;
     if (Math.abs(heightAt(x + 4, z) - y) + Math.abs(heightAt(x, z + 4) - y) > 4) continue;
-    if (FLATS.some((p) => Math.hypot(x - p.x, z - p.z) < 70) || runwayGap(x, z) < 25) continue;
-    const k = 0.7 + rng() * 0.8, sy = k * (0.8 + rng() * 0.5), cell = Math.floor((z + HALF) / TREE_CELL) * TREE_COLS + Math.floor((x + HALF) / TREE_CELL);
-    (treeGrid[cell] ||= []).push([x, z, y - 0.5, 9 * sy, 2.6 * k, count]);
-    m.compose(p.set(x, y - 0.5, z), q.setFromAxisAngle(up, rng() * 6.28), s.set(k, sy, k));
-    mesh.setMatrixAt(count, m);
-    mesh.setColorAt(count++, col.copy(C.tree).multiplyScalar(0.8 + rng() * 0.4));
+    if (FLATS.some((p) => Math.hypot(x - p.x, z - p.z) < 70) || runwayGap(x, z) < 25 || Math.hypot(x - LIGHTHOUSE.x, z - LIGHTHOUSE.z) < 25 || nearRoad(x, z)) continue;
+    const k = crop(x, z, y, 1) >= 0 ? (roll < 0.05 ? 3 : -1)           // farmland: the odd farmhouse
+      : f >= 0.5 ? (roll < smooth(60, 15, y) * 0.6 ? 1 : 0)           // forest: broadleaf low down, conifers up high
+      : y < 8 ? (roll < 0.5 ? 2 : -1)                                 // coast: palms
+      : f > 0.38 && roll < 0.1 ? 1 : -1;                              // lone trees at the forest edges
+    if (k < 0 || kinds[k].list.length >= kinds[k].max) continue;
+    kinds[k].list.push([x, z, y - 0.4, rng() * 6.28, 0.7 + rng() * 0.6]);
   }
-  mesh.count = count;
-  treeColors = mesh.instanceColor.array.slice();
-  return (trees = mesh);
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0), col = new THREE.Color();
+  return kinds.map(({ geo, h, r, list }, kind) => {
+    const mesh = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }), list.length);
+    list.forEach(([x, z, y, yaw, sc], i) => {
+      const sy = kind === 3 ? 1 : sc * (0.85 + rng() * 0.4), sxz = kind === 3 ? 1 : sc;
+      (treeGrid[Math.floor((z + HALF) / TREE_CELL) * TREE_COLS + Math.floor((x + HALF) / TREE_CELL)] ||= []).push([x, z, y, h * sy, r * sxz, kind, i]);
+      mesh.setMatrixAt(i, m.compose(p.set(x, y, z), q.setFromAxisAngle(up, yaw), s.set(sxz, sy, sxz)));
+      mesh.setColorAt(i, col.setScalar(0.85 + rng() * 0.3));
+    });
+    mesh.userData.colors = mesh.instanceColor.array.slice();
+    treeMeshes.push(mesh);
+    return mesh;
+  });
+}
+
+// Boulders scattered over the rocky ground and beaches (scenery only).
+function buildRocks() {
+  const rng = mulberry32(SEED + 3), mesh = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(1, 0), new THREE.MeshLambertMaterial({ color: 0x9a8590, flatShading: true }), 500);
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3(), e = new THREE.Euler(), col = new THREE.Color();
+  let n = 0;
+  for (let tries = 0; tries < 20000 && n < mesh.count; tries++) {
+    const x = (rng() - 0.5) * SIZE, z = (rng() - 0.5) * SIZE, y = heightAt(x, z), slope = Math.abs(heightAt(x + 4, z) - y) + Math.abs(heightAt(x, z + 4) - y);
+    if (y < 0.5 || (slope < 2.5 && rng() > 0.08) || FLATS.some((f) => Math.hypot(x - f.x, z - f.z) < 60) || runwayGap(x, z) < 20 || nearRoad(x, z)) continue;
+    const r = 0.8 + rng() ** 2 * 4;
+    mesh.setMatrixAt(n, m.compose(p.set(x, y - r * 0.3, z), q.setFromEuler(e.set(rng() * 3, rng() * 3, rng() * 3)), s.set(r, r * (0.5 + rng() * 0.4), r * (0.8 + rng() * 0.4))));
+    mesh.setColorAt(n++, col.setScalar(0.85 + rng() * 0.3));
+  }
+  mesh.count = n;
+  return mesh;
 }
 
 // Fire fuel for the 20 m cell around (x, z): grass by dryness, plus trees; sand, water and rock barely burn.
@@ -233,8 +420,7 @@ export function scorch(cell) {
     col.addUpdateRange(start * 3, 36);
   }
   col.needsUpdate = true;
-  for (const t of treeGrid[cell] || []) trees.setColorAt(t[5], CHAR);
-  if (trees.instanceColor) trees.instanceColor.needsUpdate = true;
+  for (const t of treeGrid[cell] || []) if (t[5] >= 0) { treeMeshes[t[5]].setColorAt(t[6], CHAR); treeMeshes[t[5]].instanceColor.needsUpdate = true; }
 }
 
 // Undo all scorching and rebuild burnt houses (start of a shift).
@@ -243,15 +429,14 @@ export function resetScorch(houses) {
   col.array.set(terrainColors);
   col.clearUpdateRanges();
   col.needsUpdate = true;
-  trees.instanceColor.array.set(treeColors);
-  trees.instanceColor.needsUpdate = true;
+  for (const t of treeMeshes) { t.instanceColor.array.set(t.userData.colors); t.instanceColor.needsUpdate = true; }
   for (const h of houses) { h.burnt = false; h.mats.forEach((m, i) => m.color.setHex(h.colors[i])); }
 }
 
 function buildWater() {
   const SPAN = 4200, N = 120, STEP = SPAN / N;
   const g = new THREE.PlaneGeometry(SPAN, SPAN, N, N).rotateX(-Math.PI / 2);
-  const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: C.water, roughness: 0.6, metalness: 0, flatShading: true, transparent: true, opacity: 0.86 }));
+  const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: C.water, roughness: 0.6, metalness: 0, flatShading: true, transparent: true, opacity: 0.78 }));
   const base = g.attributes.position.array.slice();
   // Follows the camera in whole-cell steps so the edge never shows and waves don't swim.
   mesh.userData.update = (t, cam) => {
@@ -279,44 +464,113 @@ function buildSky() {
   return new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false }));
 }
 
-function buildPad(at, withHangar) {
-  const g = new THREE.Group(), mat = (c) => new THREE.MeshLambertMaterial({ color: c, flatShading: true });
-  const add = (geo, color, x, y, z) => { const m = new THREE.Mesh(geo, mat(color)); m.position.set(x, y, z); g.add(m); return m; };
-  add(new THREE.CylinderGeometry(PAD_RADIUS, PAD_RADIUS + 1, 1, 8), 0x5b5566, 0, -0.48, 0);
-  for (const [w, d, x] of [[1.2, 7, -2.2], [1.2, 7, 2.2], [3.2, 1.2, 0]]) add(new THREE.BoxGeometry(w, 0.1, d), 0xffd27a, x, 0.05, 0);
+// Pad with fuel tanks (one merged mesh). Home also gets the apron, a taxiway to the runway and the hangar, all laid
+// out on the side away from the runway (k mirrors the layout).
+function buildPad(at, home) {
+  const b = bodyBaker(), k = -at.away, flat = (w, d, color, x, z, y = 0.05) => b.add(new THREE.PlaneGeometry(w, d).rotateX(-Math.PI / 2), color, x, y, z);
+  b.add(new THREE.CylinderGeometry(PAD_RADIUS, PAD_RADIUS + 1, 1, 8), 0x5b5566, 0, -0.38, 0);
+  for (const [w, d, x] of [[1.2, 7, -2.2], [1.2, 7, 2.2], [3.2, 1.2, 0]]) b.add(new THREE.BoxGeometry(w, 0.1, d), 0xffd27a, x, 0.15, 0);
   for (const [x, z] of [[-16, -12], [-12.5, -15]]) {       // fuel tanks: refuel by landing on the pad
-    add(new THREE.CylinderGeometry(1.4, 1.4, 3.2, 8), 0xf4ede4, x, 1.6, z);
-    add(new THREE.CylinderGeometry(1.45, 1.45, 0.5, 8), 0xd8452e, x, 2.2, z);
+    b.add(new THREE.CylinderGeometry(1.4, 1.4, 3.2, 8), 0xf4ede4, x * k, 1.6, z);
+    b.add(new THREE.CylinderGeometry(1.45, 1.45, 0.5, 8), 0xd8452e, x * k, 2.2, z);
   }
-  if (withHangar) {
-    add(new THREE.BoxGeometry(12, 7, 16), 0xd9c4b0, -26, 3.5, 4);
-    add(new THREE.CylinderGeometry(6.5, 6.5, 16.4, 6, 1, false, -Math.PI / 2, Math.PI).rotateX(-Math.PI / 2), 0x2f7c7a, -26, 7, 4);
+  if (home) {
+    flat(56, 50, 0x6e6874, -6 * k, 2);                                     // apron
+    flat(22, 14, 0x6e6874, 32 * k, 0, 0.04);                               // taxiway to the runway edge
+    for (let x = 24; x < 40; x += 4) flat(2, 0.5, 0xffd27a, x * k, 0, 0.07); // taxi line
+    b.add(new THREE.BoxGeometry(16, 8, 20), 0xd9c4b0, -30 * k, 4, 4);       // hangar, its door facing the pad
+    b.add(new THREE.CylinderGeometry(8, 8, 20.4, 8, 1, false, -Math.PI / 2, Math.PI).rotateX(-Math.PI / 2), 0x2f7c7a, -30 * k, 8, 4);
+    b.add(new THREE.BoxGeometry(0.2, 6, 14), 0x4a4652, -21.9 * k, 3, 4);
+    b.add(new THREE.BoxGeometry(5, 3.2, 6), 0xf3e3c8, -24 * k, 1.6, -16);  // ops hut with a control cab
+    b.add(new THREE.BoxGeometry(3, 2, 3), 0x1f3346, -24 * k, 4.2, -16);
   }
+  const g = new THREE.Mesh(b.geometry(), new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }));
   g.position.set(at.x, at.y, at.z);
   g.rotation.y = at.yaw;
   return g;
 }
 
-// Town or hospital: a pad plus a ring of houses. Returns the houses (for fire damage).
+const shade = (hex, k) => new THREE.Color(hex).multiplyScalar(k).getHex();
+const TRIM = 0xf6efe6, STONE = 0x8f8790, WOOD = 0x6b4a3a;
+// Window: white frame, dark glass, on a wall facing +x/-x (axis 'x') or +z/-z (axis 'z'), outward sign s.
+function windowAt(b, axis, s, x, y, z, w = 1, h = 1) {
+  const [fx, fz] = axis === 'x' ? [0.08, w + 0.24] : [w + 0.24, 0.08], [gx, gz] = axis === 'x' ? [0.1, w] : [w, 0.1];
+  const ox = axis === 'x' ? s * 0.04 : 0, oz = axis === 'z' ? s * 0.04 : 0;
+  b.add(new THREE.BoxGeometry(fx, h + 0.24, fz), TRIM, x + ox, y, z + oz);
+  b.add(new THREE.BoxGeometry(gx, h, gz), GLASS, x + ox * 1.6, y, z + oz * 1.6);
+}
+// A gabled house in the cabin's style, ground at y = 0, front (door and porch) facing -x, ridge along z.
+// Plank-banded walls, corner posts, framed windows, a porch, an overhanging roof with a ridge beam and a chimney.
+export function house(b, w, d, wall, roof, rng, ox = 0, oz = 0) {
+  const h = 3.2, top = 0.4 + h, p = 0.55, s = w / 2 + 0.5, L = s / Math.cos(p);
+  b.add(new THREE.BoxGeometry(w + 0.4, 0.4, d + 0.4), STONE, ox, 0.2, oz);
+  b.add(new THREE.BoxGeometry(w, h, d), wall, ox, 0.4 + h / 2, oz);
+  for (let y = 0.9; y < top - 0.2; y += 0.55) b.add(new THREE.BoxGeometry(w + 0.06, 0.06, d + 0.06), shade(wall, 0.86), ox, y, oz); // planks
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) b.add(new THREE.BoxGeometry(0.24, h, 0.24), TRIM, ox + sx * w / 2, 0.4 + h / 2, oz + sz * d / 2);
+  b.add(new THREE.ExtrudeGeometry(new THREE.Shape([new THREE.Vector2(-w / 2, 0), new THREE.Vector2(w / 2, 0), new THREE.Vector2(0, (w / 2) * Math.tan(p))]), { depth: d, bevelEnabled: false }), wall, ox, top, oz - d / 2);
+  for (const sx of [-1, 1]) {
+    b.add(new THREE.BoxGeometry(L, 0.16, d + 0.9).rotateZ(-sx * p), roof, ox + sx * s / 2, top + (w / 2 - s / 2) * Math.tan(p) + 0.1, oz);
+    for (let z = -d / 2; z <= d / 2 + 0.01; z += d / 4) b.add(new THREE.BoxGeometry(L, 0.06, 0.12).rotateZ(-sx * p), shade(roof, 0.8), ox + sx * s / 2, top + (w / 2 - s / 2) * Math.tan(p) + 0.19, oz + z); // seams
+  }
+  b.add(new THREE.BoxGeometry(0.26, 0.2, d + 1), shade(roof, 0.55), ox, top + (w / 2) * Math.tan(p) + 0.12, oz); // ridge
+  const cz = oz + (rng() < 0.5 ? -1 : 1) * d * 0.25;
+  b.add(new THREE.BoxGeometry(0.7, 2.6, 0.7), STONE, ox + w * 0.22, top + 1.1, cz);                                   // chimney
+  b.add(new THREE.BoxGeometry(0.9, 0.16, 0.9), shade(STONE, 0.7), ox + w * 0.22, top + 2.45, cz);
+  // Front: door under a porch roof on two posts; windows down both sides and on the back.
+  b.add(new THREE.BoxGeometry(0.1, 2.1, 1.2), TRIM, ox - w / 2 - 0.03, 1.45, oz);
+  b.add(new THREE.BoxGeometry(0.12, 1.9, 0.95), WOOD, ox - w / 2 - 0.06, 1.35, oz);
+  windowAt(b, 'x', -1, ox - w / 2, 2.2, oz + d * 0.3);
+  b.add(new THREE.BoxGeometry(1.8, 0.2, d * 0.6), shade(WOOD, 1.3), ox - w / 2 - 0.9, 0.4, oz);                      // porch deck
+  for (const sz of [-1, 1]) b.add(new THREE.BoxGeometry(0.16, 2.6, 0.16), TRIM, ox - w / 2 - 1.65, 1.8, oz + sz * d * 0.28);
+  b.add(new THREE.BoxGeometry(2.2, 0.12, d * 0.66).rotateZ(0.25), roof, ox - w / 2 - 0.95, 3.3, oz);
+  for (const sz of [-1, 1]) for (const f of [-0.25, 0.25]) windowAt(b, 'z', sz, ox + f * w, 2.2, oz + sz * d / 2);
+  windowAt(b, 'x', 1, ox + w / 2, 2.2, oz);
+}
+// Hospital: two storeys, rows of windows, a flat roof with a parapet and a red cross, an entrance canopy facing -x.
+export function hospital(b) {
+  const w = 12, d = 18, h = 7.6;
+  b.add(new THREE.BoxGeometry(w + 0.4, 0.4, d + 0.4), STONE, 0, 0.2, 0);
+  b.add(new THREE.BoxGeometry(w, h, d), 0xf3ede4, 0, 0.4 + h / 2, 0);
+  b.add(new THREE.BoxGeometry(w + 0.1, 0.5, d + 0.1), 0xd8352a, 0, 4.1, 0); // stripe between the floors
+  for (const y of [2.2, 6]) {
+    for (let z = -d / 2 + 2; z <= d / 2 - 1.9; z += 2.8) for (const sx of [-1, 1]) if (!(sx < 0 && y < 3 && Math.abs(z) < 2)) windowAt(b, 'x', sx, sx * w / 2, y, z, 1.4, 1.3);
+    for (const sz of [-1, 1]) for (const x of [-3, 0, 3]) windowAt(b, 'z', sz, x, y, sz * d / 2, 1.4, 1.3);
+  }
+  b.add(new THREE.BoxGeometry(w + 0.6, 0.3, d + 0.6), 0xd9d2c8, 0, h + 0.55, 0);
+  for (const sx of [-1, 1]) b.add(new THREE.BoxGeometry(0.3, 0.7, d + 0.6), 0xd9d2c8, sx * (w / 2 + 0.15), h + 0.9, 0);
+  for (const sz of [-1, 1]) b.add(new THREE.BoxGeometry(w + 0.6, 0.7, 0.3), 0xd9d2c8, 0, h + 0.9, sz * (d / 2 + 0.15));
+  for (const [cw, cd] of [[1.2, 4.4], [4.4, 1.2]]) b.add(new THREE.BoxGeometry(cw, 0.1, cd), 0xd8352a, 0, h + 0.75, 0);
+  b.add(new THREE.BoxGeometry(0.1, 2.4, 2.6), GLASS, -w / 2 - 0.05, 1.6, 0);                                     // doors
+  b.add(new THREE.BoxGeometry(3, 0.25, 5), TRIM, -w / 2 - 1.5, 3.3, 0);                                          // canopy
+  for (const sz of [-1, 1]) b.add(new THREE.BoxGeometry(0.2, 2.9, 0.2), 0xd8352a, -w / 2 - 2.8, 1.85, sz * 2.2);
+  b.add(new THREE.BoxGeometry(2.2, 1.8, 2.2), 0xb8b0b8, 2.5, h + 1.3, -5);                                       // plant room
+}
+
+// Town or hospital: a pad plus a ring of houses, each one merged mesh with its own material so fire can char it.
+// Returns the houses (for fire damage).
 function buildSite(site, scene, houses) {
-  const g = new THREE.Group(), lam = (c) => new THREE.MeshLambertMaterial({ color: c, flatShading: true });
-  const add = (geo, m, x, y, z, parent = g) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); parent.add(o); return o; };
-  add(new THREE.CylinderGeometry(PAD_RADIUS, PAD_RADIUS + 1, 1, 8), lam(site.hospital ? 0xf2ede6 : 0x5b5566), 0, -0.48, 0);
-  if (site.hospital) for (const [w, d] of [[2, 8], [8, 2]]) add(new THREE.BoxGeometry(w, 0.1, d), lam(0xd8352a), 0, 0.05, 0);
-  else for (const [w, d, x] of [[1.2, 7, -2.2], [1.2, 7, 2.2], [3.2, 1.2, 0]]) add(new THREE.BoxGeometry(w, 0.1, d), lam(0xffd27a), x, 0.05, 0);
+  const g = new THREE.Group(), pad = bodyBaker();
+  pad.add(new THREE.CylinderGeometry(PAD_RADIUS, PAD_RADIUS + 1, 1, 8), site.hospital ? 0xf2ede6 : 0x5b5566, 0, -0.48, 0);
+  if (site.hospital) for (const [w, d] of [[2, 8], [8, 2]]) pad.add(new THREE.BoxGeometry(w, 0.1, d), 0xd8352a, 0, 0.05, 0);
+  else for (const [w, d, x] of [[1.2, 7, -2.2], [1.2, 7, 2.2], [3.2, 1.2, 0]]) pad.add(new THREE.BoxGeometry(w, 0.1, d), 0xffd27a, x, 0.05, 0);
+  g.add(new THREE.Mesh(pad.geometry(), new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true })));
   const rng = mulberry32(Math.floor(site.x * 7 + site.z));
   const count = site.hospital ? 1 : 4 + Math.floor(rng() * 3);
   for (let i = 0; i < count; i++) {
-    const a = (i / count) * Math.PI * 2 + rng() * 0.4, r = site.hospital ? 24 : 21 + rng() * 6;
-    const house = new THREE.Group(), walls = lam([0xf3e3c8, 0xe8c9a4, 0xd9e2d0, 0xf0d2c0][i % 4]), roof = lam(site.hospital ? 0xd8352a : 0xb5523b);
-    const [w, h, d] = site.hospital ? [16, 8, 11] : [5 + rng() * 2, 3.5, 6 + rng() * 2];
-    add(new THREE.BoxGeometry(w, h, d), walls, 0, h / 2, 0, house);
-    add(new THREE.ConeGeometry(Math.hypot(w, d) / 2 + 0.3, 2.5, 4).rotateY(Math.PI / 4).scale(w / Math.hypot(w, d) * 1.42, 1, d / Math.hypot(w, d) * 1.42), roof, 0, h + 1.25, 0, house);
-    house.position.set(Math.cos(a) * r, 0, Math.sin(a) * r);
-    house.rotation.y = -a;
-    g.add(house);
-    const wp = house.position.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), site.yaw);
-    houses.push({ x: site.x + wp.x, z: site.z + wp.z, mats: [walls, roof], colors: [walls.color.getHex(), roof.color.getHex()], site, burnt: false });
+    let a = (i / count) * Math.PI * 2 + rng() * 0.4;
+    const r = site.hospital ? 24 : 21 + rng() * 6;
+    // Nudge round the ring until clear of the road coming in (houses are ~8 m across, the road 6 m wide).
+    const world = (a) => ({ x: site.x + Math.cos(site.yaw) * Math.cos(a) * r + Math.sin(site.yaw) * Math.sin(a) * r, z: site.z - Math.sin(site.yaw) * Math.cos(a) * r + Math.cos(site.yaw) * Math.sin(a) * r });
+    for (let k = 0; k < 12 && roadDist(world(a).x, world(a).z) < (site.hospital ? 16 : 11); k++) a += 0.2;
+    const b = bodyBaker(), mat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+    if (site.hospital) hospital(b);
+    else house(b, 5 + rng() * 2, 6 + rng() * 2, [0xf3e3c8, 0xe8c9a4, 0xd9e2d0, 0xf0d2c0][i % 4], [0xb5523b, 0x8e3829, 0x5b5566, 0x2f7c7a][Math.floor(rng() * 4)], rng);
+    const mesh = new THREE.Mesh(b.geometry(), mat);
+    mesh.position.set(Math.cos(a) * r, 0, Math.sin(a) * r);
+    mesh.rotation.y = -a; // front faces the pad
+    g.add(mesh);
+    const wp = mesh.position.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), site.yaw);
+    houses.push({ x: site.x + wp.x, z: site.z + wp.z, mats: [mat], colors: [0xffffff], site, burnt: false });
   }
   g.position.set(site.x, site.y, site.z);
   g.rotation.y = site.yaw;
@@ -324,16 +578,12 @@ function buildSite(site, scene, houses) {
 }
 
 function buildRunway() {
-  const g = new THREE.Group(), lam = (c) => new THREE.MeshLambertMaterial({ color: c, flatShading: true });
-  const add = (w, l, color, x, z) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, l).rotateX(-Math.PI / 2), lam(color)); m.position.set(x, 0, z); g.add(m); return m; };
-  add(RUNWAY.width, RUNWAY.len, 0x4a4652, 0, 0).position.y = 0.08;
-  for (let z = -RUNWAY.len / 2 + 40; z < RUNWAY.len / 2 - 30; z += 30) add(0.8, 12, 0xf2ead8, 0, z).position.y = 0.12;  // centreline
-  for (const end of [-1, 1]) for (let i = -5; i <= 5; i += 2) if (i) add(1.4, 18, 0xf2ead8, i * 1.3, end * (RUNWAY.len / 2 - 14)).position.y = 0.12; // thresholds
-  for (const side of [-1, 1]) for (let z = -RUNWAY.len / 2; z <= RUNWAY.len / 2; z += 40) {                           // edge lights
-    const m = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.4), new THREE.MeshBasicMaterial({ color: 0xffd27a }));
-    m.position.set(side * (RUNWAY.width / 2 + 1), 0.3, z);
-    g.add(m);
-  }
+  const b = bodyBaker(), add = (w, l, color, x, y, z) => b.add(new THREE.PlaneGeometry(w, l).rotateX(-Math.PI / 2), color, x, y, z);
+  add(RUNWAY.width, RUNWAY.len, 0x4a4652, 0, 0.08, 0);
+  for (let z = -RUNWAY.len / 2 + 40; z < RUNWAY.len / 2 - 30; z += 30) add(0.8, 12, 0xf2ead8, 0, 0.12, z);  // centreline
+  for (const end of [-1, 1]) for (let i = -5; i <= 5; i += 2) if (i) add(1.4, 18, 0xf2ead8, i * 1.3, 0.12, end * (RUNWAY.len / 2 - 14)); // thresholds
+  for (const side of [-1, 1]) for (let z = -RUNWAY.len / 2; z <= RUNWAY.len / 2; z += 40) b.add(new THREE.BoxGeometry(0.4, 0.4, 0.4), 0xffd27a, side * (RUNWAY.width / 2 + 1), 0.3, z); // edge lights
+  const g = new THREE.Mesh(b.geometry(), new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, emissive: 0x201810 }));
   g.position.set(RUNWAY.x, RUNWAY.y, RUNWAY.z);
   g.rotation.y = Math.atan2(RUNWAY.dx, RUNWAY.dz);
   return g;
@@ -347,14 +597,56 @@ function buildWindsock() {
   pivot.rotation.order = 'YXZ';
   pivot.add(new THREE.Mesh(new THREE.ConeGeometry(0.45, 2.8, 6, 1, true).rotateX(Math.PI / 2).translate(0, 0, 1.4), new THREE.MeshLambertMaterial({ color: 0xff6a2a, flatShading: true, side: THREE.DoubleSide })));
   pole.add(pivot);
-  const side = PAD.yaw + Math.PI / 2;
-  pole.position.set(PAD.x + Math.sin(side) * 15, PAD.y, PAD.z + Math.cos(side) * 15);
+  const at = padLocal(PAD, 22 * -PAD.away, 16); // between the pad and the runway
+  pole.position.set(at.x, PAD.y, at.z);
   pole.userData.update = (wind) => {
     const str = Math.hypot(wind.x, wind.z);
     pivot.rotation.y = Math.atan2(wind.x, wind.z);
     pivot.rotation.x = (1 - Math.min(1, str / 10)) * 1.2;
   };
   return pole;
+}
+
+// Lighthouse at the tip of a stone breakwater, off a low stretch of coast far from base, so its beam sweeps open sea.
+export const LIGHTHOUSE = (() => {
+  let best = null;
+  for (let a = 0; a < Math.PI * 2; a += 0.02) {
+    const dx = Math.cos(a), dz = Math.sin(a);
+    let r = 1300;
+    while (r > 0 && height(dx * r, dz * r) < 1) r -= 5;
+    const len = 80, x = dx * (r + len), z = dz * (r + len);
+    if ([40, 80, 120, 160, 220].some((k) => !(height(dx * (r - k), dz * (r - k)) > 1 && height(dx * (r - k), dz * (r - k)) < 22)) || height(x, z) > -3) continue; // low land behind, open water ahead
+    if (SITES.some((p) => Math.hypot(p.x - x, p.z - z) < 200)) continue;
+    const score = Math.hypot(x - PAD.x, z - PAD.z);
+    if (!best || score > best.score) best = { x, z, y: SEA, len, score, yaw: Math.atan2(-dx, -dz) }; // local +z points back to shore
+  }
+  return best;
+})();
+function buildLighthouse() {
+  const L = LIGHTHOUSE, g = new THREE.Group(), b = bodyBaker(), rng = mulberry32(SEED + 5), STONE = 0x8f8790;
+  b.add(new THREE.BoxGeometry(6, 9, L.len + 20), STONE, 0, -3, L.len / 2 + 6);                          // breakwater, running into the beach
+  for (let z = 4; z < L.len + 10; z += 3.5) for (const side of [-1, 1])                                   // armour stones along both sides
+    b.add(new THREE.DodecahedronGeometry(1.4 + rng() * 0.8, 0), rng() < 0.5 ? 0x9a8f96 : 0x7d7480, side * (3.2 + rng() * 0.6), 0.2 + rng() * 0.6, z);
+  b.add(new THREE.CylinderGeometry(5, 5.6, 9, 10), STONE, 0, -3, 0);                                    // round plinth at the tip
+  b.add(new THREE.CylinderGeometry(1.5, 2.3, 15, 8, 6), (x, y) => (Math.floor((y - 1.5) / 2.5) % 2 ? 0xd8352a : 0xf6efe6), 0, 9, 0);
+  b.add(new THREE.CylinderGeometry(2.4, 2.4, 0.4, 8), 0x2a2a32, 0, 16.7, 0);
+  b.add(new THREE.ConeGeometry(1.7, 1.8, 8), 0xd8352a, 0, 19.8, 0);
+  b.add(new THREE.BoxGeometry(3.6, 2.6, 4), 0xf3e3c8, 0, 2.8, 12);                                       // keeper's hut
+  b.add(new THREE.CylinderGeometry(0, 3, 1.4, 4, 1).rotateY(Math.PI / 4).scale(0.9, 1, 1), 0x5b5566, 0, 4.8, 12);
+  g.add(new THREE.Mesh(b.geometry(), new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true })));
+  const lamp = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 2, 8), new THREE.MeshBasicMaterial({ color: 0xfff2b0 }));
+  lamp.position.y = 17.9;
+  const beam = new THREE.Group(), beamMat = new THREE.MeshBasicMaterial({ color: 0xfff0c0, transparent: true, opacity: 0.06, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+  beam.add(new THREE.Mesh(new THREE.ConeGeometry(6, 160, 10, 1, true).translate(0, -80, 0).rotateZ(Math.PI / 2), beamMat));
+  beam.position.y = 17.9;
+  beam.rotation.z = 0.05;
+  g.add(lamp, beam);
+  g.position.set(L.x, L.y, L.z);
+  g.rotation.y = L.yaw;
+  (treeGrid[Math.floor((L.z + HALF) / TREE_CELL) * TREE_COLS + Math.floor((L.x + HALF) / TREE_CELL)] ||= []).push([L.x, L.z, L.y, 21, 5.5, -1, -1]);
+  // Sector light: the beam fades out while it points back over the land (local +z is the shore).
+  g.userData.update = (t) => { beam.rotation.y = t * 0.8; beamMat.opacity = 0.08 * smooth(-0.1, 0.5, Math.sin(beam.rotation.y)); };
+  return g;
 }
 
 export function buildWorld(scene) {
@@ -367,8 +659,9 @@ export function buildWorld(scene) {
   const seabed = new THREE.Mesh(new THREE.PlaneGeometry(12000, 12000).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: C.seabed }));
   seabed.position.y = FLOOR - 0.5;
   const windsock = buildWindsock();
-  scene.add(sun, sky, seabed, buildTerrain(), buildTrees(), water, buildPad(PAD, true), buildPad(DEPOT, false), buildRunway(), windsock);
+  const lighthouse = buildLighthouse();
+  scene.add(lighthouse, sun, sky, seabed, buildTerrain(), ...buildTrees(), buildRocks(), buildRoads(), water, buildPad(PAD, true), buildPad(DEPOT, false), buildRunway(), windsock);
   const houses = [];
   for (const site of SITES) buildSite(site, scene, houses);
-  return { sky, water, windsock, houses };
+  return { sky, water, windsock, lighthouse, houses };
 }

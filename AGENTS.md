@@ -17,7 +17,7 @@ A browser game: low-poly island air dispatch. You fly helicopters and a water bo
 ```sh
 npm install
 npm run dev            # game: http://localhost:5173/
-                       # model viewer: http://localhost:5173/inspect.html?model=plane
+                       # model viewer: http://localhost:5173/inspect.html?model=plane (also house, hospital, loads)
 npm test               # node self-checks: flight, rig, fire, shift, career, plane
 npm run build          # static site in dist/
 ```
@@ -27,13 +27,14 @@ npm run build          # static site in dist/
 | File | What's in it |
 |---|---|
 | `main.js` | Loop (fixed 60 Hz sim + interpolation), input, camera, HUD, modes (title/shift/results/hangar), wiring |
-| `world.js` | Terrain heightmap, trees, water, sky, pads, sites/houses, runway, fire fuel, scorching |
+| `world.js` | Terrain heightmap and biomes, trees/palms/farmhouses, rocks, roads, water, sky, base (pad, hangar, runway), towns (`house`, `hospital` models), lighthouse, fire fuel, scorching |
 | `chopper.js` | Helicopter flight (`stepFlight`, `TUNE`) **and helicopter models** (`buildChopper`, `BODIES`), plus the shared model helpers |
 | `plane.js` | Water bomber flight (`stepPlane`, `PLANE`) **and its model** (`buildPlane`) |
 | `tools.js` | Rope/bucket/hook physics (`RIG`) **and load models** (crate, heavy cargo, person, bucket/hook/rope views) |
 | `fire.js` | Cellular wildfire sim + flame/smoke rendering |
 | `missions.js` | Dispatch director, jobs, chaos/combo, markers |
 | `career.js` | Save data, upgrades, `AIRFRAMES` (stats, livery, camera distance, scale) |
+| `life.js` | Ambient moving scenery: clouds, gulls, sailboats (no collision) |
 | `fx.js`, `audio.js` | Pooled particles; synthesized audio + the prop loop |
 
 ## Model conventions (read before touching any model)

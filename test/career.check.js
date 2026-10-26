@@ -41,11 +41,10 @@ assert.ok(heavyCap > baseCap * 2 && TUNE.thrust < baseThrust);
 applyLoadout(base);
 assert.ok(RIG.cap === baseCap && TUNE.thrust === baseThrust && RIG.bucket.line === baseLine);
 
-// Shift results: bank the pay, track bests separately for normal and daily shifts.
+// Shift results: bank the pay, track the best shift.
 const r = newCareer();
 assert.ok(recordShift(r, 1200));
 assert.ok(!recordShift(r, 800));
-assert.ok(recordShift(r, 500, '2026-10-25'));
-assert.equal(r.bank, 2500);
+assert.equal(r.bank, 2000);
 assert.equal(r.best, 1200);
 console.log('career ok');
