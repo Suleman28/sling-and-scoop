@@ -38,7 +38,7 @@ const KEY = 'rotor-relay-career';
 export function newCareer() {
   const levels = {};
   for (const f in AIRFRAMES) levels[f] = Object.fromEntries(upgradesFor(f).map((k) => [k, 0]));
-  return { bank: 0, levels, owned: ['scout'], airframe: 'scout', best: 0 };
+  return { bank: 0, levels, owned: ['scout'], airframe: 'scout', best: 0, projects: [] };
 }
 
 // storage: anything with getItem/setItem (localStorage in the browser). Storage can be missing or blocked.
@@ -52,7 +52,7 @@ export function loadCareer(storage) {
         const v = shared ? (owned.includes(f) ? old[k] : 0) : old?.[f]?.[k];
         c.levels[f][k] = Math.min(MAX_LEVEL, Math.max(0, Math.floor(Number(v)) || 0));
       }
-      return { ...c, ...saved, levels: c.levels, owned };
+      return { ...c, ...saved, levels: c.levels, owned, projects: (saved.projects || []).filter((k) => k in PROJECTS) };
     }
   } catch {}
   return newCareer();
@@ -93,6 +93,23 @@ export function buyUpgrade(c, key) {
   return `${u.name} upgraded to level ${lv[key]}`;
 }
 
+// Island projects: one-off builds that change the world and the economy (see world.js for the models).
+export const PROJECTS = {
+  stations: { name: 'Town refuel stations', cost: 9000, blurb: 'Fuel pumps at every town pad: refuel without flying home' },
+  pond: { name: 'Base dip tank', cost: 6000, blurb: 'An open water tank by the hangar: fill the bucket without going to sea' },
+  fuelFarm: { name: 'Fuel farm', cost: 12000, blurb: 'Bulk fuel storage: fuel bills −40%' },
+  workshop: { name: 'Maintenance workshop', cost: 15000, blurb: 'Your own mechanics: repair bills −50%' },
+  towers: { name: 'Fire lookout towers', cost: 18000, blurb: 'Ridge-top lookouts spot wildfires early, before they spread' },
+};
+export function buyProject(c, key) {
+  const p = PROJECTS[key];
+  if (c.projects.includes(key)) return `${p.name}: already built`;
+  if (c.bank < p.cost) return `Need $${p.cost.toLocaleString()} for the ${p.name}`;
+  c.bank -= p.cost;
+  c.projects.push(key);
+  return `${p.name} built!`;
+}
+
 export function buyOrSelectAirframe(c, key) {
   const a = AIRFRAMES[key];
   if (!c.owned.includes(key)) {
@@ -112,8 +129,9 @@ export const COSTS = {
   loss: { cargo: 150, casualty: 200 },
 };
 // Bills take the career so island projects can apply discounts here later.
-export const fuelBill = (career, kind, amount) => COSTS.fuel[kind] * amount;
-export const repairBill = (career, kind, hit) => Math.max(0, hit - COSTS.repair.free) * COSTS.repair.perMs * COSTS.repair.class[kind];
+const has = (career, key) => career.projects?.includes(key);
+export const fuelBill = (career, kind, amount) => COSTS.fuel[kind] * amount * (has(career, 'fuelFarm') ? 0.6 : 1);
+export const repairBill = (career, kind, hit) => Math.max(0, hit - COSTS.repair.free) * COSTS.repair.perMs * COSTS.repair.class[kind] * (has(career, 'workshop') ? 0.5 : 1);
 export const netOf = (st) => Math.round(st.earned - st.fuel - st.repairs - st.losses);
 
 // End of shift: bank the net (gross minus costs, may go negative) and record bests. Returns true for a new best.

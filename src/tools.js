@@ -70,13 +70,15 @@ export function stepRig(r, s, dt, env) {
   v.y += (-G - v.y * RIG.airDrag) * dt;
   if (r.taut) v.addScaledVector(v.clone().sub(s.vel), -RIG.swingDamp * dt);
 
-  const overSea = env.heightAt(r.pos.x, r.pos.z) < SEA - 0.5;
-  r.dipped = overSea && r.pos.y - hang < SEA;
+  // The sea, or the base dip tank once it's built (env.pond: { x, z, r, y } surface).
+  const inPond = env.pond && Math.hypot(r.pos.x - env.pond.x, r.pos.z - env.pond.z) < env.pond.r - 0.8, surface = inPond ? env.pond.y : SEA;
+  const overSea = inPond || env.heightAt(r.pos.x, r.pos.z) < SEA - 0.5;
+  r.dipped = overSea && r.pos.y - hang < surface;
   if (r.dipped) v.multiplyScalar(Math.exp(-3 * dt));
   r.pos.addScaledVector(v, dt);
 
   // The bucket can sink 1 m under the surface to scoop; everything else rests on land or floats.
-  const floor = (overSea && !r.crate && r.tool === 'bucket' ? SEA - 1 : env.groundAt(r.pos.x, r.pos.z)) + hang;
+  const floor = (overSea && !r.crate && r.tool === 'bucket' ? surface - 1 : env.groundAt(r.pos.x, r.pos.z)) + hang;
   if (r.pos.y < floor) {
     r.pos.y = floor;
     if (v.y < 0) v.y = 0;

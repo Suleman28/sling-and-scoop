@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { buildWorld, RUNWAY, onRunway, fuelAt, groundAt, heightAt, hitTrees, PAD, PAD_RADIUS, padLocal, PADS, resetScorch, scorch, SEA, SEED } from './world.js';
+import { buildWorld, POND, setProjects, SITES, RUNWAY, onRunway, fuelAt, groundAt, heightAt, hitTrees, PAD, PAD_RADIUS, padLocal, PADS, resetScorch, scorch, SEA, SEED } from './world.js';
 import { buildChopper, createFlight, stepFlight } from './chopper.js';
 import { buildPlane, createPlane, drop, PLANE, stepPlane } from './plane.js';
 import { sfx, startAudio, thud, setVolume, toggleMute, updateAudio } from './audio.js';
@@ -7,7 +7,7 @@ import { makeParticles } from './fx.js';
 import { buildLife } from './life.js';
 import { act, winch, buildRigView, splashReach, createRig, hangOf, massOf, nearestCrate, placeCrateMesh, RIG, stepCrate, stepRig, swapTool } from './tools.js';
 import { buildFireView, createFire, douse, resetFire, stepFire } from './fire.js';
-import { AIRFRAMES, applyLoadout, buyOrSelectAirframe, buyUpgrade, fuelBill, loadCareer, MAX_LEVEL, netOf, recordShift, repairBill, saveCareer, upgradeCost, UPGRADES, upgradesFor } from './career.js';
+import { AIRFRAMES, applyLoadout, buyOrSelectAirframe, buyUpgrade, buyProject, fuelBill, loadCareer, PROJECTS, MAX_LEVEL, netOf, recordShift, repairBill, saveCareer, upgradeCost, UPGRADES, upgradesFor } from './career.js';
 import { abandon, accept, comboMult, createDispatch, disposeDispatch, onScorch, SHIFT, updateDispatch, updateMarkers } from './missions.js';
 
 const STEP = 1 / 60;
@@ -129,7 +129,10 @@ function updateWind(t) {
   wind.x = Math.cos(a) * wind.str;
   wind.z = Math.sin(a) * wind.str;
 }
-const env = { groundAt, heightAt, trees: hitTrees, wind, loadMass: 0 };
+const env = { groundAt, heightAt, trees: hitTrees, wind, loadMass: 0, pond: null };
+// Island projects show in the world and switch on their effects (the dip tank joins the bucket's water sources).
+const buildout = () => { setProjects(career.projects); env.pond = career.projects.includes('pond') ? POND : null; };
+buildout();
 
 // Input: keyboard state -> axes in [-1, 1].
 const keys = new Set(), pending = { act: false, swap: false, accept: -1, abandon: false }; // one-shot actions, consumed by the next sim step
@@ -206,7 +209,7 @@ function towHome() {
   Object.assign(rig, createRig(rigHome.x, PAD.y + 1.2, rigHome.z), { tool: rig.tool });
   prev.pos.copy(s.pos);
 }
-const onPad = () => s.grounded && PADS.some((p) => Math.hypot(s.pos.x - p.x, s.pos.z - p.z) < PAD_RADIUS);
+const onPad = () => s.grounded && [...PADS, ...(career.projects.includes('stations') ? SITES.filter((p) => !p.hospital) : [])].some((p) => Math.hypot(s.pos.x - p.x, s.pos.z - p.z) < PAD_RADIUS);
 const atStrip = () => isPlane() && s.grounded && onRunway(s.pos.x, s.pos.z); // stopped on the airstrip: refuel and hangar
 const atBase = () => atStrip() || (s.grounded && Math.hypot(s.pos.x - PAD.x, s.pos.z - PAD.z) < PAD_RADIUS); // hangar is open here, even mid-shift
 const onShift = () => mode === 'shift' || (mode === 'hangar' && backTo === 'shift');           // shopping mid-shift doesn't stop the clock
@@ -325,7 +328,7 @@ function startShift() {
   s.fuel = 1;
   rig.water = 0;
   simT = 0;
-  dispatch = createDispatch({ scene, fire, houses, crates, can: (type) => airframe().jobs.includes(type), firepower: () => (isPlane() ? PLANE.tank : hasLine() ? RIG.cap : 0) }, seed);
+  dispatch = createDispatch({ scene, fire, houses, crates, can: (type) => airframe().jobs.includes(type), firepower: () => (isPlane() ? PLANE.tank : hasLine() ? RIG.cap : 0), lookout: () => career.projects.includes('towers') }, seed);
   window.__game.dispatch = dispatch;
   resumeTo = 'shift';
   setMode('shift');
@@ -542,7 +545,7 @@ function meterHtml() {
 
 // ---- Hangar: spend the bank between shifts. Keys 1-n upgrade the airframe you're flying, then buy or switch airframe. ----
 
-const AIRFRAME_KEYS = Object.keys(AIRFRAMES);
+const AIRFRAME_KEYS = Object.keys(AIRFRAMES), PROJECT_KEYS = Object.keys(PROJECTS), LETTERS = 'ABCDE'; // projects take letter keys
 function openHangar(msg = '') {
   if (mode !== 'hangar') backTo = mode;
   setMode('hangar');
@@ -556,12 +559,18 @@ function openHangar(msg = '') {
     const a = AIRFRAMES[k], state = career.airframe === k ? 'FLYING' : career.owned.includes(k) ? 'owned' : `$${a.cost.toLocaleString()}`;
     return `<tr data-key="Digit${upKeys.length + i + 1}"><td>[${upKeys.length + i + 1}] ${a.name}</td><td></td><td class="dim">${a.blurb}</td><td>${state}</td></tr>`;
   }).join('');
+  const projects = PROJECT_KEYS.map((k, i) => {
+    const p = PROJECTS[k], built = career.projects.includes(k);
+    return `<tr data-key="Key${LETTERS[i]}"><td>[${LETTERS[i]}] ${p.name}</td><td></td><td class="dim">${p.blurb}</td><td>${built ? 'BUILT' : `$${p.cost.toLocaleString()}`}</td></tr>`;
+  }).join('');
   overlay.innerHTML = `<h1>HANGAR</h1><p>Bank <b>$${career.bank.toLocaleString()}</b></p>
-    <table class="hangar"><tr><th colspan="4">Upgrades: ${airframe().name}</th></tr>${ups}<tr><th colspan="4">Airframes</th></tr>${frames}</table>
+    <table class="hangar"><tr><th colspan="4">Upgrades: ${airframe().name}</th></tr>${ups}<tr><th colspan="4">Airframes</th></tr>${frames}<tr><th colspan="4">Island projects</th></tr>${projects}</table>
     <p class="msg">${msg}</p>${backTo === 'shift' ? '<p class="dim">Your shift is still running!</p>' : ''}<nav class="menu row">${btn('Escape', 'Back')}</nav>`;
 }
 function hangarKey(code) {
   if (code === 'KeyH' || code === 'Escape') return setMode(backTo);
+  const p = LETTERS.indexOf(/^Key([A-E])$/.exec(code)?.[1]);
+  if (p >= 0 && code !== 'KeyH') { const msg = buyProject(career, PROJECT_KEYS[p]); buildout(); saveCareer(storage, career); return openHangar(msg); }
   const n = /^Digit(\d)$/.exec(code)?.[1] - 1, upKeys = upgradesFor(career.airframe);
   if (!(n >= 0)) return;
   const msg = n < upKeys.length ? buyUpgrade(career, upKeys[n]) : AIRFRAME_KEYS[n - upKeys.length] ? buyOrSelectAirframe(career, AIRFRAME_KEYS[n - upKeys.length]) : '';

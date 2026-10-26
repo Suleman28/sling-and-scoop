@@ -1,5 +1,17 @@
 # Plan: "Dispatch" — low-poly helicopter rescue/cargo game (browser)
 
+
+## Resolved decisions (Phase 6c: island projects, hangar)
+- **Island projects** ($60k in total), bought in the hangar with keys A–E. They're built into the world, so you can see what you bought:
+  - Town refuel stations, $9k: refuel at any town pad.
+  - Base dip tank, $6k: a raised open tank at base the bucket can dip in, so no trip to the sea.
+  - Fuel farm, $12k: fuel bills −40%.
+  - Maintenance workshop, $15k: repair bills −50%.
+  - Fire lookout towers, $18k: three ridge-top towers; new wildfires start as a single cell, without their seed patch.
+- **Discounts live in the bills:** `fuelBill` and `repairBill` in career.js. `career.projects` is saved, and old saves load with none.
+- **Hangar:** a detailed arched hangar replaces the box-and-half-cylinder: corrugated cladding, roof rib bands, sliding doors, an office annex and floodlights.
+- **Overlay:** it scrolls when its content is taller than the screen (`place-content: safe center`).
+
 ## Resolved decisions (Running costs)
 - **Shifts net less than they gross.** `COSTS` in `career.js`; bills via `fuelBill(career, kind, amount)` and `repairBill(career, kind, hit)` (they take `career` so island projects can discount later). Shift net = earned − fuel − repairs − losses, banked by `recordShift(c, earned, costs)`; best shift is on net; the bank may go slightly negative (never blocks flying).
   - Fuel $ per full tank: scout 150, utility 350, heavy 700, bomber 800. Charged as the tank fills on pads/strip (shown in the refuel prompt); free roam is free.

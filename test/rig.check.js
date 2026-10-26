@@ -128,3 +128,13 @@ const run = (r, s, secs, env, move = () => s.vel.set(0, 0, 0), each = () => {}) 
   assert.equal(r.len, RIG.bucket.line);
 }
 console.log('rig ok');
+// The base dip tank fills the bucket over dry land once it's built; without it, dry land never does.
+{
+  const tank = { ...land, pond: { x: 0, z: 0, r: 8, y: 1.6 } };
+  for (const [env, fills] of [[tank, true], [land, false]]) {
+    const s = heli(RIG.bucket.line + 2.2), r = createRig(0, 3, 0);
+    for (let i = 0; i < 4 * 60; i++) { s.vel.set(0, 0, 0); stepRig(r, s, dt, env); }
+    assert.equal(r.water > 0.5 * RIG.cap, fills, `dip tank ${fills ? 'fills' : 'does not fill'} the bucket (${r.water.toFixed(2)})`);
+  }
+}
+console.log('dip tank ok');

@@ -45,7 +45,7 @@ export const comboMult = (combo) => Math.min(SHIFT.comboMax, 1 + SHIFT.comboStep
 export function createDispatch(world, seed) {
   for (const h of world.houses) h.burnT = 0;
   return {
-    can: () => true, firepower: () => 1, ...world, rng: mulberry32(seed), calls: [], job: null, t: 0, spawnT: 3, nextId: 1, props: [],
+    can: () => true, firepower: () => 1, lookout: () => false, ...world, rng: mulberry32(seed), calls: [], job: null, t: 0, spawnT: 3, nextId: 1, props: [],
     chaos: 0, combo: 0, comboT: 0, lastId: 0, over: false,
     stats: { earned: 0, done: { fire: 0, cargo: 0, rescue: 0 }, bestCombo: 0, housesLost: 0, lost: 0, fuel: 0, repairs: 0, losses: 0 },
     view: buildMarkers(world.scene),
@@ -183,7 +183,7 @@ function spawn(d) {
       const x = site.x + Math.cos(a) * r, z = site.z + Math.sin(a) * r, c = cellOf(x, z);
       if (fuelAt(x, z) < 0.75 || !ignite(d.fire, c, id)) continue;
       d.fire.rate.set(id, cls.rate);
-      for (const [di, dj] of cls.seed) ignite(d.fire, c + di + dj * FIRE.n, id);
+      if (!d.lookout()) for (const [di, dj] of cls.seed) ignite(d.fire, c + di + dj * FIRE.n, id); // lookouts call it in while it's one cell
       const j = { ...base, title: `${cls.name} near ${site.name}`, major: cls === FIRES[2], x, z, reward: cls.reward, burnt: 0, housesLost: 0 };
       return story(d, j, [{ type: 'cargo', goods: pick(d, ['Water tanks', 'Groceries']), from: BASE, to: site }]);
     }

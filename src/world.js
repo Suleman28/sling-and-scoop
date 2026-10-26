@@ -709,7 +709,7 @@ function buildLighthouse() {
 
 // Where they go. The pond, workshop and fuel farm sit on the base's flat ground (pad-local, hangar side);
 // lookout towers on three high, flat-ish spots far apart; town refuel stations beside each town pad, clear of houses.
-export const POND = { ...padLocal(PAD, 8 * PAD.away, -42), y: PAD.y - 0.6, r: 9 }; // water surface a bucket can dip in
+export const POND = { ...padLocal(PAD, 8 * PAD.away, -42), y: PAD.y + 1.6, r: 8 }; // dip tank: water surface a bucket can dip in
 const WORKSHOP = padLocal(PAD, 30 * PAD.away, 27), FUEL_FARM = padLocal(PAD, 28 * PAD.away, -36);
 export const TOWERS = (() => {
   // Rank a grid of high, open spots (height minus roughness), then take the best three at least 450 m apart.
@@ -740,15 +740,19 @@ export function station(b) {
   b.add(new THREE.BoxGeometry(2.4, 0.2, 4.4), 0xf6efe6, 2.6, 3.2, 0);              // canopy
   b.add(new THREE.BoxGeometry(2.44, 0.12, 4.44), RED, 2.6, 3.0, 0);
 }
-// Base fire pond: stone rim, water a bucket can dip in, a pump house and a jetty.
+// Base dip tank: an open-topped corrugated tank, water 1.6 m up for the bucket to dip in, a ladder, a pump house.
 export function pond(b) {
-  b.add(new THREE.CylinderGeometry(POND.r + 0.6, POND.r + 0.9, 0.9, 20, 1, true), 0x8f8790, 0, 0.1, 0);
-  b.add(new THREE.CylinderGeometry(POND.r + 0.6, POND.r + 0.6, 0.15, 20), 0x8f8790, 0, 0.55, 0);
-  b.add(new THREE.CircleGeometry(POND.r, 20).rotateX(-Math.PI / 2), 0x3a8fa6, 0, -0.6, 0);
-  b.add(new THREE.CylinderGeometry(POND.r, POND.r, 1.6, 20, 1, true), 0x2d5f78, 0, -1.2, 0); // inner wall, seen through the water
-  b.add(new THREE.BoxGeometry(2.4, 2.2, 2.4), 0xf3e3c8, POND.r + 2.4, 1.1, 0);    // pump house
-  b.add(new THREE.CylinderGeometry(0, 2.1, 1, 4, 1).rotateY(Math.PI / 4), STEEL, POND.r + 2.4, 2.7, 0);
-  b.add(new THREE.CylinderGeometry(0.2, 0.2, 2.6, 6).rotateZ(Math.PI / 2), 0x2a2a32, POND.r + 0.4, 0.4, 0);
+  const r = POND.r, top = 2.2, TANK = 0x9fb7b0;
+  b.add(new THREE.CylinderGeometry(r + 0.15, r + 0.15, top, 24, 1, true), TANK, 0, top / 2, 0);                     // outer wall
+  b.add(new THREE.CylinderGeometry(r, r, top, 24, 1, true).scale(-1, 1, 1), 0x6f8a86, 0, top / 2, 0);              // inner wall (faces in)
+  for (let a = 0; a < Math.PI * 2; a += Math.PI / 12) b.add(new THREE.BoxGeometry(0.12, top, 0.12), shade(TANK, 0.8), Math.cos(a) * (r + 0.2), top / 2, Math.sin(a) * (r + 0.2)); // ribs
+  b.add(new THREE.CylinderGeometry(r + 0.3, r + 0.3, 0.15, 24, 1, true), 0x2a2a32, 0, top, 0);                       // rim
+  b.add(new THREE.CircleGeometry(r, 24).rotateX(-Math.PI / 2), 0x3a8fa6, 0, POND.y - PAD.y, 0);                     // water
+  for (let y = 0.3; y < top; y += 0.45) b.add(new THREE.BoxGeometry(0.5, 0.06, 0.08), STEEL, r + 0.45, y, 0);        // ladder
+  for (const z of [-0.25, 0.25]) b.add(new THREE.BoxGeometry(0.06, top + 0.6, 0.06), STEEL, r + 0.45, top / 2 + 0.3, z);
+  b.add(new THREE.BoxGeometry(2.4, 2.2, 2.4), 0xf3e3c8, r + 3, 1.1, 2);                                              // pump house
+  b.add(new THREE.CylinderGeometry(0, 2.1, 1, 4, 1).rotateY(Math.PI / 4), STEEL, r + 3, 2.7, 2);
+  b.add(new THREE.CylinderGeometry(0.18, 0.18, 2.4, 6).rotateZ(Math.PI / 2), YELLOW, r + 1.1, 0.4, 2);
 }
 // Maintenance workshop: gabled shed with a roller door, an outdoor gantry over a parts stand, crates.
 export function workshop(b) {
