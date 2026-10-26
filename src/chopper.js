@@ -17,6 +17,7 @@ export const TUNE = {
   loadClimb: 0.4,                   // climb lost per unit of slung load mass
   bank: 0.35,
   agility: 1.0,                     // attitude & collective response multiplier per airframe
+  probes: [],                       // [x, y, z] body points (metres, scaled, nose -z) that hit terrain and trees: tail tip, landing legs
 };
 const G = 9.81;
 
@@ -95,6 +96,23 @@ export function stepFlight(s, input, dt, env) {
     if (steep > 0.75) s.hit = Math.max(s.hit, reflect(s.vel, -gx / steep, -gz / steep, T.bounce));
   }
   if (env.trees) s.hit = Math.max(s.hit, env.trees(s.pos, s.vel));
+
+  // Tail and landing legs: yaw-only probes push the craft up off terrain and out of trees (ground-sitting probes get 0.1 m slack).
+  const cy = Math.cos(s.yaw), sy = Math.sin(s.yaw);
+  for (const [px, py, pz] of T.probes) {
+    const wx = s.pos.x + px * cy + pz * sy, wz = s.pos.z - px * sy + pz * cy, pen = groundAt(wx, wz) - (s.pos.y + py);
+    if (pen > 0.1) {
+      const gx = (groundAt(wx + 1, wz) - groundAt(wx - 1, wz)) / 2, gz = (groundAt(wx, wz + 1) - groundAt(wx, wz - 1)) / 2, steep = Math.hypot(gx, gz);
+      s.pos.y += pen;
+      s.hit = Math.max(s.hit, steep > 0.3 ? reflect(s.vel, -gx / steep, -gz / steep, T.bounce) : 0);
+      if (s.vel.y < 0) s.vel.y = 0;
+    }
+    if (env.trees) {
+      const q = new THREE.Vector3(wx, s.pos.y + py, wz), qx = q.x, qz = q.z;
+      s.hit = Math.max(s.hit, env.trees(q, s.vel, 0.6, 0));
+      s.pos.x += q.x - qx; s.pos.z += q.z - qz;
+    }
+  }
 
   // Fast contact is a scrape: hop off and bleed speed instead of snagging on the slope.
   const hs = Math.hypot(s.vel.x, s.vel.z);

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { buildChopper, createFlight, stepFlight } from '../src/chopper.js';
+import { buildChopper, createFlight, stepFlight, TUNE } from '../src/chopper.js';
 import { AIRFRAMES } from '../src/career.js';
 
 // All chopper models build cleanly with finite geometry and spin without error.
@@ -52,3 +52,13 @@ assert.ok(s.maxHit > 10 && s.pos.z > -110, `cliff hit ${s.maxHit} at z ${s.pos.z
 const a = run(createFlight(0, 10, 0, 0), { fwd: 1, turn: 1, lift: 1 }, 5), b = run(createFlight(0, 10, 0, 0), { fwd: 1, turn: 1, lift: 1 }, 5);
 assert.deepEqual(a.pos.toArray(), b.pos.toArray());
 console.log('flight ok');
+
+// Reversing the tail into a rising slope lifts the craft: the tail probe never ends up below the ground.
+{
+  const heavy = AIRFRAMES.heavy.tune.probes, slope = { groundAt: (x, z) => 10 + Math.max(0, z - 5) * 3 };
+  Object.assign(TUNE, { probes: heavy });
+  const w = createFlight(0, 10, 0, 0);
+  for (let i = 0; i < 600; i++) { stepFlight(w, { ...idle, fwd: -1 }, dt, slope); assert.ok(w.pos.y + heavy[0][1] >= slope.groundAt(0, w.pos.z + heavy[0][2]) - 0.11, 'tail above ground'); }
+  assert.ok(w.pos.y > 10.5, `tail pushed craft up ${w.pos.y}`);
+  Object.assign(TUNE, { probes: [] });
+}
