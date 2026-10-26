@@ -1,5 +1,8 @@
 # Plan: "Dispatch" — low-poly helicopter rescue/cargo game (browser)
 
+## Resolved decisions (Settings screen)
+- **Settings** (key 4 on the main menu, 3 when paused; Esc/Back returns to where it was opened): a frozen 'settings' mode. The controls list moved off the HUD into its first section (keycap table: Helicopter, Water Bomber, General); the `#help` line is now an option, off by default, and a one-time "Esc: pause · Settings for controls" prompt shows at the first shift or free roam. Options (master volume, look sensitivity, invert Y, show FPS, show hint) persist in localStorage `rotorRelay.settings`. Keydown ignores keys while an input is focused (except Esc). Volume sits under the M mute.
+
 ## Resolved decisions (Phase 6a: menus, free roam, living island)
 - **Menus:** start menu over a slow orbit of the parked aircraft: 1 Start shift, 2 Free roam, 3 Hangar (click or key). Esc pauses (freezes the shift clock): resume, hangar (at base, or anywhere in free roam), end shift (banks earnings) or main menu. The HUD only shows while flying.
 - **Daily shift removed:** without a shared leaderboard it played the same as a normal shift. Bring it back alongside a leaderboard if one is ever added.

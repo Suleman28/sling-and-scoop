@@ -17,7 +17,9 @@ npm run build   # static site in dist/
 
 **Water bomber:** Space/Shift throttle · W/S pitch (nose down/up) · A/D roll · Q/E rudder · F drop. Take off from the airstrip; skim the sea above ~65 km/h to scoop.
 
-**Everywhere:** 1–5 take a call · X abandon the job · H hangar (title/results screen, the home pad or the airstrip) · mouse drag to look around · wheel to zoom · M mute
+**Everywhere:** 1–5 take a call · X abandon the job · H hangar (title/results screen, the home pad or the airstrip) · mouse drag to look around · wheel to zoom · M mute · Esc pause
+
+In game the same list lives under **Settings** (main menu or pause), along with volume, look sensitivity, invert Y, FPS and an optional on-screen controls hint (off by default). Arrow keys also fly.
 
 ## Credits
 

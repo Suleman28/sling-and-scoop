@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { buildWorld, RUNWAY, onRunway, fuelAt, groundAt, heightAt, hitTrees, PAD, PAD_RADIUS, padLocal, PADS, resetScorch, scorch, SEA, SEED } from './world.js';
 import { buildChopper, createFlight, stepFlight } from './chopper.js';
 import { buildPlane, createPlane, drop, PLANE, stepPlane } from './plane.js';
-import { sfx, startAudio, thud, toggleMute, updateAudio } from './audio.js';
+import { sfx, startAudio, thud, setVolume, toggleMute, updateAudio } from './audio.js';
 import { makeParticles } from './fx.js';
 import { buildLife } from './life.js';
 import { act, winch, buildRigView, createRig, hangOf, massOf, nearestCrate, placeCrateMesh, RIG, stepCrate, stepRig, swapTool } from './tools.js';
@@ -31,6 +31,12 @@ const updateLife = buildLife(scene);
 let storage = null;
 try { storage = localStorage; } catch {}
 const career = loadCareer(storage);
+// Options persist under one key; unknown or bad values fall back to the defaults.
+const SETTINGS_KEY = 'rotorRelay.settings';
+const opts = { volume: 1, sens: 1, invertY: false, fps: true, hint: false, tipSeen: false };
+try { Object.assign(opts, JSON.parse(storage.getItem(SETTINGS_KEY))); } catch {}
+const saveOpts = () => { try { storage.setItem(SETTINGS_KEY, JSON.stringify(opts)); } catch {} };
+setVolume(opts.volume);
 if (import.meta.env.DEV) career.bank = Math.max(career.bank, 1_000_000); // dev server only: test money for trying everything
 applyLoadout(career);
 const airframe = () => AIRFRAMES[career.airframe];
@@ -39,8 +45,9 @@ const hasLine = () => airframe().tools.length > 0; // the starter Scout and the 
 const buildCraft = () => (isPlane() ? buildPlane(airframe()) : buildChopper(airframe()));
 let craft = buildCraft();
 scene.add(craft.group);
-// Controls line follows the aircraft type.
+// Controls line follows the aircraft type; the full list lives in Settings.
 function setHelp() {
+  document.getElementById('help').hidden = !opts.hint;
   document.getElementById('help').textContent = isPlane()
     ? 'Space/Shift throttle · W/S pitch · A/D bank · skim the sea to scoop · F drop · 1–5 take call · X abandon · drag look · wheel zoom · M mute · Esc pause'
     : `W/S pitch · A/D turn · Q/E strafe · Space/Shift climb/descend${hasLine() ? ' · F action · R bucket/hook · Z/C winch' : ''} · 1–5 take call · X abandon · drag look · wheel zoom · M mute · Esc pause`;
@@ -127,6 +134,7 @@ const env = { groundAt, heightAt, trees: hitTrees, wind, loadMass: 0 };
 // Input: keyboard state -> axes in [-1, 1].
 const keys = new Set(), pending = { act: false, swap: false, accept: -1, abandon: false }; // one-shot actions, consumed by the next sim step
 addEventListener('keydown', (e) => {
+  if (e.target.closest?.('input') && e.code !== 'Escape') return; // settings sliders and checkboxes keep their own keys
   keys.add(e.code);
   if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
   if (!e.repeat) press(e.code);
@@ -136,10 +144,12 @@ document.getElementById('overlay').addEventListener('click', (e) => { const k = 
 function press(code) {
   startAudio();
   if (code === 'KeyM') return toggleMute();
+  if (mode === 'settings') return code === 'Escape' && closeSettings();
   if (mode === 'hangar') return hangarKey(code);
   if (mode === 'title' || mode === 'results') {
     if (code === 'Digit1') startShift();
     if (code === 'Digit2' && mode === 'title') startFree();
+    if (code === 'Digit4' && mode === 'title') openSettings();
     if (code === 'KeyH' || (code === 'Digit3' && mode === 'title')) openHangar();
     if (code === 'Escape' && mode === 'results') setMode('title');
     return;
@@ -147,6 +157,7 @@ function press(code) {
   if (mode === 'paused') {
     if (code === 'Escape' || code === 'Digit1') setMode(resumeTo);
     if (code === 'KeyH' && canHangar()) openHangar();
+    if (code === 'Digit3') openSettings();
     if (code === 'Digit2') resumeTo === 'shift' ? endShift(true) : setMode('title');
     return;
   }
@@ -165,8 +176,8 @@ renderer.domElement.addEventListener('pointerdown', (e) => { orbit.dragging = tr
 renderer.domElement.addEventListener('pointerup', () => { orbit.dragging = false; orbit.idle = 0; });
 renderer.domElement.addEventListener('pointermove', (e) => {
   if (!orbit.dragging) return;
-  orbit.yaw -= e.movementX * 0.006;
-  orbit.pitch = Math.min(1.2, Math.max(-0.35, orbit.pitch + e.movementY * 0.004));
+  orbit.yaw -= e.movementX * 0.006 * opts.sens;
+  orbit.pitch = Math.min(1.2, Math.max(-0.35, orbit.pitch + e.movementY * 0.004 * opts.sens * (opts.invertY ? -1 : 1)));
 });
 renderer.domElement.addEventListener('wheel', (e) => { e.preventDefault(); orbit.zoom = Math.min(4, Math.max(0.6, orbit.zoom * Math.exp(e.deltaY * 0.001))); }, { passive: false });
 renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -239,22 +250,61 @@ const btn = (key, label, sub = '') => `<button data-key="${key}"><b>${key === 'E
 const menuHtml = () => `<h1>ROTOR RELAY</h1><p class="tag">Island air dispatch</p><nav class="menu">
   ${btn('Digit1', 'Start shift', 'Fight wildfires, sling cargo, pull people out of trouble')}
   ${btn('Digit2', 'Free roam', 'No calls, no clock, unlimited fuel')}
-  ${btn('Digit3', 'Hangar', `Bank $${career.bank.toLocaleString()}`)}</nav>
+  ${btn('Digit3', 'Hangar', `Bank $${career.bank.toLocaleString()}`)}
+  ${btn('Digit4', 'Settings', 'Controls, volume, look sensitivity')}</nav>
   <p class="dim small">Calls left waiting fill the chaos meter; when it's full the shift ends.<br>Finish jobs back to back to chain them for bonus pay.</p>
   <p class="credit">Bomber engine sound: "airplane prop loop" by AntumDeluge, from a recording by jakobthiesen (CC BY 3.0)</p>`;
-const pauseHtml = () => `<h1>PAUSED</h1><nav class="menu">${btn('Escape', 'Resume')}${canHangar() ? btn('KeyH', 'Hangar') : ''}
+const pauseHtml = () => `<h1>PAUSED</h1><nav class="menu">${btn('Escape', 'Resume')}${canHangar() ? btn('KeyH', 'Hangar') : ''}${btn('Digit3', 'Settings', 'Controls and options')}
   ${resumeTo === 'shift' ? btn('Digit2', 'End shift', 'Bank what you have earned so far') : btn('Digit2', 'Main menu')}</nav>`;
+const kb = (...k) => k.map((x) => `<kbd>${x}</kbd>`).join('');
+const group = (title, rows) => `<div><h3>${title}</h3><table>${rows.map(([k, d]) => `<tr><td>${k}</td><td>${d}</td></tr>`).join('')}</table></div>`;
+const CONTROLS = [
+  ['Helicopter', [[kb('W', 'S'), 'Pitch forward / back'], [kb('A', 'D'), 'Turn'], [kb('Q', 'E'), 'Strafe'], [kb('Space', 'Shift'), 'Climb / descend'],
+    [kb('F'), 'Action: dump, hook, release'], [kb('R'), 'Swap bucket / hook'], [kb('Z', 'C'), 'Winch in / out']]],
+  ['Water Bomber', [[kb('Space', 'Shift'), 'Throttle up / down'], [kb('W', 'S'), 'Pitch nose down / up'], [kb('A', 'D'), 'Bank'], [kb('Q', 'E'), 'Rudder'],
+    ['<span class="dim">Skim the sea</span>', 'Scoop water above ~65 km/h'], [kb('F'), 'Drop water']]],
+  ['General', [[kb('1', '–', '5'), 'Take a call'], [kb('X'), 'Abandon the job'], [kb('H'), 'Hangar (at base, anywhere in free roam)'], [kb('M'), 'Mute'], [kb('Esc'), 'Pause / back'],
+    [kb('Drag'), 'Look around'], [kb('Wheel'), 'Zoom']]],
+];
+const OPTS = [['volume', 'Master volume', 'range', 0, 1], ['sens', 'Mouse look sensitivity', 'range', 0.25, 2], ['invertY', 'Invert look Y'], ['fps', 'Show FPS'], ['hint', 'Show controls hint while flying']];
+const optHtml = ([k, label, type, min, max]) => type
+  ? `<label><span>${label}</span><input type="range" data-opt="${k}" min="${min}" max="${max}" step="0.05" value="${opts[k]}"><output>${Math.round(opts[k] * 100)}%</output></label>`
+  : `<label><span>${label}</span><input type="checkbox" data-opt="${k}"${opts[k] ? ' checked' : ''}></label>`;
+let settingsFrom = 'title';
+function openSettings() { settingsFrom = mode; setMode('settings'); }
+function closeSettings() { setMode(settingsFrom); }
+const settingsHtml = () => `<div><h1>SETTINGS</h1><h2>Controls</h2>
+  <div class="ctl">${CONTROLS.map(([t, r]) => group(t, r)).join('')}</div>
+  <p class="dim small">Arrow keys also fly: up/down pitch, left/right turn (bank).</p>
+  <h2>Options</h2><div class="opts">${OPTS.map(optHtml).join('')}</div>
+  <nav class="menu row">${btn('Escape', 'Back')}</nav></div>`;
+overlay.addEventListener('input', (e) => {
+  const el = e.target, k = el.dataset.opt;
+  if (!k) return;
+  opts[k] = el.type === 'checkbox' ? el.checked : +el.value;
+  if (el.type === 'range') el.nextElementSibling.textContent = `${Math.round(opts[k] * 100)}%`;
+  if (k === 'volume') setVolume(opts.volume);
+  if (k === 'hint') setHelp();
+  saveOpts();
+});
 // The overlay and which HUD parts show (CSS keys off body[data-mode]) follow the mode.
 function setMode(m) {
   mode = m;
   document.body.dataset.mode = m;
-  overlay.className = m === 'title' ? 'side' : '';
+  overlay.className = m === 'title' ? 'side' : m === 'settings' ? 'settings' : '';
   overlay.style.display = m === 'shift' || m === 'free' ? 'none' : '';
   if (m === 'title') overlay.innerHTML = menuHtml();
   if (m === 'results') overlay.innerHTML = resultsHtml;
   if (m === 'paused') overlay.innerHTML = pauseHtml();
+  if (m === 'settings') overlay.innerHTML = settingsHtml();
 }
 setMode('title');
+// With the hint off, tell new players once where the controls went.
+function tip() {
+  if (opts.hint || opts.tipSeen) return;
+  opts.tipSeen = true; saveOpts();
+  say('Esc: pause · Settings for controls'); flashT = 6;
+}
 // A fresh island to fly around: no calls, fires out, back at home.
 function startFree() {
   if (dispatch) disposeDispatch(dispatch);
@@ -264,6 +314,7 @@ function startFree() {
   towHome();
   resumeTo = 'free';
   setMode('free');
+  tip();
 }
 function startShift() {
   const seed = (Math.random() * 2 ** 31) | 0;
@@ -278,6 +329,7 @@ function startShift() {
   window.__game.dispatch = dispatch;
   resumeTo = 'shift';
   setMode('shift');
+  tip();
 }
 function endShift(quit) {
   const st = dispatch.stats, best = recordShift(career, st.earned);
@@ -429,7 +481,7 @@ renderer.setAnimationLoop((now) => {
   const load = isPlane() ? `THR    ${bar(s.throttle)} ${Math.round(s.throttle * 100)}%\nTANK   ${bar(s.water / PLANE.tank)} ${Math.round((s.water / PLANE.tank) * 100)}%`
     : !hasLine() ? 'LINE   none (rescues only)'
     : `${rig.tool === 'bucket' ? `BUCKET ${bar(rig.water / RIG.cap)} ${Math.round((rig.water / RIG.cap) * 100)}%` : `HOOK   ${held}`}\nLINE   ${rig.len <= 0.15 ? 'stowed' : `${rig.len.toFixed(1)} m`} (Z/C)`;
-  hud.textContent = `ROTOR RELAY\nALT ${alt.toFixed(0).padStart(4)} m\nSPD ${(speed * 3.6).toFixed(0).padStart(4)} km/h\nV/S ${s.vel.y.toFixed(1).padStart(5)} m/s\nWND ${wind.str.toFixed(0).padStart(4)} m/s\nFUEL   ${bar(s.fuel)} ${Math.round(s.fuel * 100)}%\n${load}\n${fps} fps`;
+  hud.textContent = `ROTOR RELAY\nALT ${alt.toFixed(0).padStart(4)} m\nSPD ${(speed * 3.6).toFixed(0).padStart(4)} km/h\nV/S ${s.vel.y.toFixed(1).padStart(5)} m/s\nWND ${wind.str.toFixed(0).padStart(4)} m/s\nFUEL   ${bar(s.fuel)} ${Math.round(s.fuel * 100)}%\n${load}${opts.fps ? `\n${fps} fps` : ''}`;
   if (frames % 15 === 0) board.innerHTML = boardHtml(goal);
   if (onShift()) meter.innerHTML = meterHtml();
   updateCompass(goal, dispatch?.job?.type);

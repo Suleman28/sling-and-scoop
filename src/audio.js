@@ -2,7 +2,7 @@
 // ("airplane prop loop" by AntumDeluge from a recording by jakobthiesen, CC BY 3.0, see README), pitched by throttle.
 // If the file can't load, a synthesized twin-prop voice stands in.
 let propLoop = null, propRate = null, propLp = null;
-let ctx, master, noise, lfo, lfoDepth, rotorLp, chop, whine, whineGain, piston, pistonLp, pistonGain, windGain, waterBp, waterGain, engines, planeBus, turbine, muted = false;
+let ctx, master, noise, lfo, lfoDepth, rotorLp, chop, whine, whineGain, piston, pistonLp, pistonGain, windGain, waterBp, waterGain, engines, planeBus, turbine, muted = false, level = 1;
 
 function noiseSource() {
   const src = ctx.createBufferSource();
@@ -17,7 +17,7 @@ export function startAudio() {
   if (ctx) return;
   ctx = new AudioContext();
   master = ctx.createGain();
-  master.gain.value = muted ? 0 : 0.5;
+  master.gain.value = muted ? 0 : 0.5 * level;
   master.connect(ctx.destination);
   noise = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
   const d = noise.getChannelData(0);
@@ -218,5 +218,11 @@ export function thud(v) {
 
 export function toggleMute() {
   muted = !muted;
-  if (master) master.gain.setTargetAtTime(muted ? 0 : 0.5, ctx.currentTime, 0.05);
+  if (master) master.gain.setTargetAtTime(muted ? 0 : 0.5 * level, ctx.currentTime, 0.05);
+}
+
+// Master volume 0..1, applied under the mute switch.
+export function setVolume(v) {
+  level = v;
+  if (master && !muted) master.gain.setTargetAtTime(0.5 * level, ctx.currentTime, 0.05);
 }
