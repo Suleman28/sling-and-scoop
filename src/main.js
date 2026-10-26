@@ -7,7 +7,7 @@ import { makeParticles } from './fx.js';
 import { buildLife } from './life.js';
 import { act, winch, buildRigView, splashReach, createRig, hangOf, massOf, nearestCrate, placeCrateMesh, RIG, stepCrate, stepRig, swapTool } from './tools.js';
 import { buildFireView, createFire, douse, resetFire, stepFire } from './fire.js';
-import { AIRFRAMES, applyLoadout, buyOrSelectAirframe, buyUpgrade, loadCareer, MAX_LEVEL, recordShift, saveCareer, upgradeCost, UPGRADES, upgradesFor } from './career.js';
+import { AIRFRAMES, applyLoadout, buyOrSelectAirframe, buyUpgrade, fuelBill, loadCareer, MAX_LEVEL, netOf, recordShift, repairBill, saveCareer, upgradeCost, UPGRADES, upgradesFor } from './career.js';
 import { abandon, accept, comboMult, createDispatch, disposeDispatch, onScorch, SHIFT, updateDispatch, updateMarkers } from './missions.js';
 
 const STEP = 1 / 60;
@@ -331,15 +331,18 @@ function startShift() {
   setMode('shift');
   tip();
 }
+const cost = (n) => (Math.round(n) ? `−$${Math.round(n).toLocaleString()}` : '<span class="dim">—</span>');
 function endShift(quit) {
-  const st = dispatch.stats, best = recordShift(career, st.earned);
+  const st = dispatch.stats, net = netOf(st), best = recordShift(career, st.earned, st.earned - net);
   saveCareer(storage, career);
   const mins = `${Math.floor(dispatch.t / 60)}:${String(Math.floor(dispatch.t % 60)).padStart(2, '0')}`;
   resultsHtml = `<h1>SHIFT OVER</h1><p class="dim">Shift · ${quit ? 'clocked off' : 'chaos took over'} at ${mins}</p>
     <table><tr><td>Fires out</td><td>${st.done.fire}</td></tr><tr><td>Deliveries</td><td>${st.done.cargo}</td></tr><tr><td>Rescues</td><td>${st.done.rescue}</td></tr>
     <tr><td>Best chain</td><td>${st.bestCombo} jobs (×${comboMult(st.bestCombo).toFixed(2)})</td></tr>
     <tr><td>Houses lost</td><td>${st.housesLost}</td></tr><tr><td>Casualties lost</td><td>${st.lost}</td></tr>
-    <tr class="big"><td>Earned${best ? ' · NEW BEST' : ''}</td><td>$${st.earned.toLocaleString()}</td></tr>
+    <tr><td>Earned</td><td>$${st.earned.toLocaleString()}</td></tr>
+    <tr><td>Fuel</td><td>${cost(st.fuel)}</td></tr><tr><td>Repairs</td><td>${cost(st.repairs)}</td></tr><tr><td>Losses</td><td>${cost(st.losses)}</td></tr>
+    <tr class="big"><td>Net${best ? ' · NEW BEST' : ''}</td><td>${net < 0 ? '−' : ''}$${Math.abs(net).toLocaleString()}</td></tr>
     <tr><td>Best shift</td><td>$${career.best.toLocaleString()}</td></tr>
     <tr><td>Bank</td><td>$${career.bank.toLocaleString()}</td></tr></table>
     <nav class="menu row">${btn('Digit1', 'New shift')}${btn('KeyH', 'Hangar')}${btn('Escape', 'Main menu')}</nav>`;
@@ -384,7 +387,11 @@ renderer.setAnimationLoop((now) => {
     fire.scorched.length = 0;
     spawnDrops(rig, rig.poured, false);
     spawnDrops(rig, rig.spilled, true);
-    if ((onPad() && input.lift <= 0) || (atStrip() && s.throttle < 0.1)) s.fuel = Math.min(1, s.fuel + 0.2 * STEP);
+    if ((onPad() && input.lift <= 0) || (atStrip() && s.throttle < 0.1)) {
+      const add = Math.min(1 - s.fuel, 0.2 * STEP);
+      s.fuel += add;
+      if (onShift()) dispatch.stats.fuel += fuelBill(career, career.airframe, add); // free roam is free
+    }
     towT = s.fuel <= 0 && s.grounded ? towT + STEP : 0;
     if (towT > 3) towHome();
     hit = Math.max(hit, s.hit);
@@ -393,6 +400,7 @@ renderer.setAnimationLoop((now) => {
   // Hard landings, cliff and tree strikes: shake + thump. Gentle touchdowns stay silent.
   if (hit > 2.5) { trauma = Math.min(1, trauma + hit / 20); thud(Math.min(1, hit / 15)); }
   trauma = Math.max(0, trauma - dt * 1.5);
+  if (onShift()) dispatch.stats.repairs += repairBill(career, career.airframe, hit); // the airframe's own hits only: rig/crate swings never reach `hit`
 
   // Interpolate between the last two sim states for smooth rendering.
   const a = acc / STEP;
@@ -488,7 +496,7 @@ renderer.setAnimationLoop((now) => {
   flashT -= dt;
   prompt.textContent = flashT > 0 ? flash
     : s.fuel <= 0 ? (s.grounded ? 'Out of fuel. Towing you back to base…' : isPlane() ? 'ENGINES OUT: glide down onto the water' : 'ENGINE OUT: autorotating, find somewhere to land')
-    : onPad() && s.fuel < 1 ? `Refuelling… ${Math.round(s.fuel * 100)}%${atBase() ? ' · H: Hangar' : ''}`
+    : onPad() && s.fuel < 1 ? `Refuelling… ${Math.round(s.fuel * 100)}%${onShift() ? ` · −$${Math.round(dispatch.stats.fuel).toLocaleString()}` : ''}${atBase() ? ' · H: Hangar' : ''}`
     : atBase() && mode !== 'hangar' ? 'H: Hangar'
     : s.fuel < 0.2 && t % 1 < 0.6 ? (isPlane() ? 'LOW FUEL: land on the airstrip to refuel' : 'LOW FUEL: land on a pad to refuel')
     : isPlane() ? planePrompt()
@@ -521,7 +529,7 @@ function boardHtml(goal) {
   const bonus = (o) => (o.after && o.after === d.lastId ? ` <b class="follow">+${Math.round((SHIFT.followBonus - 1) * 100)}%</b>` : '');
   const rows = d.calls.map((o, i) => `<div>[${i + 1}] ${tag(o.type)}${heavyTag(o)} ${o.title} · $${o.reward}${bonus(o)} · ${km(o)} km${late(o)}${part(o)}</div>`).join('') || '<div class="dim">No calls right now</div>';
   const job = d.job ? `<div class="job">${tag(d.job.type)} ${goal ? `${goal.text} · ${(goal.dist / 1000).toFixed(1)} km` : ''}<br><span class="dim">X: abandon</span></div>` : (d.calls.length ? `<div class="dim">Press ${d.calls.length > 1 ? `1–${d.calls.length}` : '1'} to take a call</div>` : '');
-  return `<div class="head">DISPATCH <span>$${(career.bank + (mode === 'shift' ? d.stats.earned : 0)).toLocaleString()}</span></div>${rows}${job}`;
+  return `<div class="head">DISPATCH <span>$${(career.bank + (onShift() ? netOf(d.stats) : 0)).toLocaleString()}</span></div>${rows}${job}`;
 }
 
 function meterHtml() {

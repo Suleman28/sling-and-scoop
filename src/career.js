@@ -104,10 +104,23 @@ export function buyOrSelectAirframe(c, key) {
   return `Flying the ${a.name}`;
 }
 
-// End of shift: bank the pay and record bests. Returns true for a new best.
-export function recordShift(c, earned) {
-  c.bank += earned;
-  const best = earned > c.best;
-  if (best) c.best = earned;
+// Running costs. fuel: $ per full tank; repair: $ per m/s of impact above `free`, times the airframe's class (heavier
+// iron is dearer to fix); loss: charged when cargo is smashed or a casualty is hurt by a rough set-down.
+export const COSTS = {
+  fuel: { scout: 150, utility: 350, heavy: 700, bomber: 800 },
+  repair: { free: 3, perMs: 12, class: { scout: 0.6, utility: 1, heavy: 2, bomber: 2.2 } },
+  loss: { cargo: 150, casualty: 200 },
+};
+// Bills take the career so island projects can apply discounts here later.
+export const fuelBill = (career, kind, amount) => COSTS.fuel[kind] * amount;
+export const repairBill = (career, kind, hit) => Math.max(0, hit - COSTS.repair.free) * COSTS.repair.perMs * COSTS.repair.class[kind];
+export const netOf = (st) => Math.round(st.earned - st.fuel - st.repairs - st.losses);
+
+// End of shift: bank the net (gross minus costs, may go negative) and record bests. Returns true for a new best.
+export function recordShift(c, earned, costs = 0) {
+  const net = Math.round(earned - costs);
+  c.bank += net;
+  const best = net > c.best;
+  if (best) c.best = net;
   return best;
 }
