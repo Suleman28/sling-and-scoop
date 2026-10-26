@@ -7,7 +7,7 @@ import { makeParticles } from './fx.js';
 import { buildLife } from './life.js';
 import { act, winch, buildRigView, splashReach, createRig, hangOf, massOf, nearestCrate, placeCrateMesh, RIG, stepCrate, stepRig, swapTool } from './tools.js';
 import { buildFireView, createFire, douse, resetFire, stepFire } from './fire.js';
-import { AIRFRAMES, applyLoadout, buyOrSelectAirframe, buyUpgrade, buyProject, fuelBill, loadCareer, PROJECTS, MAX_LEVEL, netOf, recordShift, repairBill, saveCareer, upgradeCost, UPGRADES, upgradesFor } from './career.js';
+import { AIRFRAMES, applyLoadout, buyOrSelectAirframe, buyUpgrade, buyProject, fuelBill, loadCareer, PROJECTS, MAX_LEVEL, netOf, recordShift, saveCareer, upgradeCost, UPGRADES, upgradesFor } from './career.js';
 import { abandon, accept, comboMult, createDispatch, disposeDispatch, onScorch, SHIFT, updateDispatch, updateMarkers } from './missions.js';
 
 const STEP = 1 / 60;
@@ -344,7 +344,7 @@ function endShift(quit) {
     <tr><td>Best chain</td><td>${st.bestCombo} jobs (×${comboMult(st.bestCombo).toFixed(2)})</td></tr>
     <tr><td>Houses lost</td><td>${st.housesLost}</td></tr><tr><td>Casualties lost</td><td>${st.lost}</td></tr>
     <tr><td>Earned</td><td>$${st.earned.toLocaleString()}</td></tr>
-    <tr><td>Fuel</td><td>${cost(st.fuel)}</td></tr><tr><td>Repairs</td><td>${cost(st.repairs)}</td></tr><tr><td>Losses</td><td>${cost(st.losses)}</td></tr>
+    <tr><td>Fuel</td><td>${cost(st.fuel)}</td></tr><tr><td>Losses</td><td>${cost(st.losses)}</td></tr>
     <tr class="big"><td>Net${best ? ' · NEW BEST' : ''}</td><td>${net < 0 ? '−' : ''}$${Math.abs(net).toLocaleString()}</td></tr>
     <tr><td>Best shift</td><td>$${career.best.toLocaleString()}</td></tr>
     <tr><td>Bank</td><td>$${career.bank.toLocaleString()}</td></tr></table>
@@ -403,7 +403,6 @@ renderer.setAnimationLoop((now) => {
   // Hard landings, cliff and tree strikes: shake + thump. Gentle touchdowns stay silent.
   if (hit > 2.5) { trauma = Math.min(1, trauma + hit / 20); thud(Math.min(1, hit / 15)); }
   trauma = Math.max(0, trauma - dt * 1.5);
-  if (onShift()) dispatch.stats.repairs += repairBill(career, career.airframe, hit); // the airframe's own hits only: rig/crate swings never reach `hit`
 
   // Interpolate between the last two sim states for smooth rendering.
   const a = acc / STEP;
@@ -570,7 +569,7 @@ function openHangar(msg = '') {
 function hangarKey(code) {
   if (code === 'KeyH' || code === 'Escape') return setMode(backTo);
   const p = LETTERS.indexOf(/^Key([A-E])$/.exec(code)?.[1]);
-  if (p >= 0 && code !== 'KeyH') { const msg = buyProject(career, PROJECT_KEYS[p]); buildout(); saveCareer(storage, career); return openHangar(msg); }
+  if (PROJECT_KEYS[p] && code !== 'KeyH') { const msg = buyProject(career, PROJECT_KEYS[p]); buildout(); saveCareer(storage, career); return openHangar(msg); }
   const n = /^Digit(\d)$/.exec(code)?.[1] - 1, upKeys = upgradesFor(career.airframe);
   if (!(n >= 0)) return;
   const msg = n < upKeys.length ? buyUpgrade(career, upKeys[n]) : AIRFRAME_KEYS[n - upKeys.length] ? buyOrSelectAirframe(career, AIRFRAME_KEYS[n - upKeys.length]) : '';

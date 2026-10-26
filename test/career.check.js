@@ -86,17 +86,16 @@ assert.ok(!recordShift(r, 800));
 assert.equal(r.bank, 2000);
 assert.equal(r.best, 1200);
 console.log('career ok');
-// Island projects: bought once, and the fuel farm and workshop discount the running costs.
+// Island projects: bought once, and the fuel farm discounts fuel.
 {
-  const { buyProject, fuelBill, repairBill } = await import('../src/career.js');
+  const { buyProject, fuelBill } = await import('../src/career.js');
   const c = newCareer();
   c.bank = 50000;
-  const fuel = fuelBill(c, 'utility', 1), repair = repairBill(c, 'utility', 15);
+  const fuel = fuelBill(c, 'utility', 1);
   assert.match(buyProject(c, 'fuelFarm'), /built/);
   assert.match(buyProject(c, 'fuelFarm'), /already/);
-  assert.match(buyProject(c, 'workshop'), /built/);
-  assert.ok(fuelBill(c, 'utility', 1) < fuel && repairBill(c, 'utility', 15) === repair / 2);
-  assert.equal(c.bank, 50000 - 12000 - 15000);
+  assert.ok(fuelBill(c, 'utility', 1) < fuel);
+  assert.equal(c.bank, 50000 - 12000);
   c.bank = 1000;
   assert.match(buyProject(c, 'towers'), /Need/);
   console.log('projects ok');

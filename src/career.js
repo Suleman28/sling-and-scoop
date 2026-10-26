@@ -98,7 +98,6 @@ export const PROJECTS = {
   stations: { name: 'Town refuel stations', cost: 9000, blurb: 'Fuel pumps at every town pad: refuel without flying home' },
   pond: { name: 'Base dip tank', cost: 6000, blurb: 'An open water tank by the hangar: fill the bucket without going to sea' },
   fuelFarm: { name: 'Fuel farm', cost: 12000, blurb: 'Bulk fuel storage: fuel bills −40%' },
-  workshop: { name: 'Maintenance workshop', cost: 15000, blurb: 'Your own mechanics: repair bills −50%' },
   towers: { name: 'Fire lookout towers', cost: 18000, blurb: 'Ridge-top lookouts spot wildfires early, before they spread' },
 };
 export function buyProject(c, key) {
@@ -121,18 +120,16 @@ export function buyOrSelectAirframe(c, key) {
   return `Flying the ${a.name}`;
 }
 
-// Running costs. fuel: $ per full tank; repair: $ per m/s of impact above `free`, times the airframe's class (heavier
-// iron is dearer to fix); loss: charged when cargo is smashed or a casualty is hurt by a rough set-down.
+// Running costs. fuel: $ per full tank; loss: charged when cargo is smashed or a casualty is hurt by a rough set-down.
+// (Repairs come later, with a damage meter you pay off at a pad; see PLAN.md.)
 export const COSTS = {
   fuel: { scout: 150, utility: 350, heavy: 700, bomber: 800 },
-  repair: { free: 3, perMs: 12, class: { scout: 0.6, utility: 1, heavy: 2, bomber: 2.2 } },
   loss: { cargo: 150, casualty: 200 },
 };
 // Bills take the career so island projects can apply discounts here later.
 const has = (career, key) => career.projects?.includes(key);
 export const fuelBill = (career, kind, amount) => COSTS.fuel[kind] * amount * (has(career, 'fuelFarm') ? 0.6 : 1);
-export const repairBill = (career, kind, hit) => Math.max(0, hit - COSTS.repair.free) * COSTS.repair.perMs * COSTS.repair.class[kind] * (has(career, 'workshop') ? 0.5 : 1);
-export const netOf = (st) => Math.round(st.earned - st.fuel - st.repairs - st.losses);
+export const netOf = (st) => Math.round(st.earned - st.fuel - st.losses);
 
 // End of shift: bank the net (gross minus costs, may go negative) and record bests. Returns true for a new best.
 export function recordShift(c, earned, costs = 0) {

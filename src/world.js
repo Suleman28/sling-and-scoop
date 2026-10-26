@@ -710,7 +710,7 @@ function buildLighthouse() {
 // Where they go. The pond, workshop and fuel farm sit on the base's flat ground (pad-local, hangar side);
 // lookout towers on three high, flat-ish spots far apart; town refuel stations beside each town pad, clear of houses.
 export const POND = { ...padLocal(PAD, 8 * PAD.away, -42), y: PAD.y + 1.6, r: 8 }; // dip tank: water surface a bucket can dip in
-const WORKSHOP = padLocal(PAD, 30 * PAD.away, 27), FUEL_FARM = padLocal(PAD, 28 * PAD.away, -36);
+const FUEL_FARM = padLocal(PAD, 28 * PAD.away, -36);
 export const TOWERS = (() => {
   // Rank a grid of high, open spots (height minus roughness), then take the best three at least 450 m apart.
   const cand = [], rng = mulberry32(SEED + 6);
@@ -823,7 +823,7 @@ function buildProjects(scene, houses) {
     return place(station, best, s.y, -best.a + Math.PI); // pump side faces the pad
   }));
   group('pond', [place(pond, POND, PAD.y, PAD.yaw)]);
-  group('workshop', [place(workshop, WORKSHOP, PAD.y, PAD.yaw + (PAD.away > 0 ? Math.PI : 0))]);
+  // ponytail: the workshop model waits for the damage-meter update (repairs paid at a pad, workshop discount)
   group('fuelFarm', [place(fuelFarm, FUEL_FARM, PAD.y, PAD.yaw)]);
   group('towers', TOWERS.map((t) => place(lookout, t, t.y - 0.2, t.yaw)));
   for (const t of TOWERS) (treeGrid[Math.floor((t.z + HALF) / TREE_CELL) * TREE_COLS + Math.floor((t.x + HALF) / TREE_CELL)] ||= []).push([t.x, t.z, t.y, 14, 3, -1, -1]);

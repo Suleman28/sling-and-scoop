@@ -47,7 +47,7 @@ export function createDispatch(world, seed) {
   return {
     can: () => true, firepower: () => 1, lookout: () => false, ...world, rng: mulberry32(seed), calls: [], job: null, t: 0, spawnT: 3, nextId: 1, props: [],
     chaos: 0, combo: 0, comboT: 0, lastId: 0, over: false,
-    stats: { earned: 0, done: { fire: 0, cargo: 0, rescue: 0 }, bestCombo: 0, housesLost: 0, lost: 0, fuel: 0, repairs: 0, losses: 0 },
+    stats: { earned: 0, done: { fire: 0, cargo: 0, rescue: 0 }, bestCombo: 0, housesLost: 0, lost: 0, fuel: 0, losses: 0 },
     view: buildMarkers(world.scene),
   };
 }

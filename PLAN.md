@@ -1,12 +1,19 @@
 # Plan: "Dispatch" — low-poly helicopter rescue/cargo game (browser)
 
 
+
+## Post-deploy updates (planned)
+- **Damage and repairs:**
+  - Hard landings and strikes fill a visible damage meter on the HUD, which could affect handling at high damage.
+  - You pay to repair at a pad, where a "Repairing… −$X" prompt shows, like refuelling.
+  - A maintenance workshop island project halves the repair price. Its model (`workshop` in world.js) is already built and viewable in inspect.html.
+  - Charging repairs silently at the end of a shift was tried and removed: invisible damage felt unfair.
+
 ## Resolved decisions (Phase 6c: island projects, hangar)
-- **Island projects** ($60k in total), bought in the hangar with keys A–E. They're built into the world, so you can see what you bought:
+- **Island projects** ($45k in total), bought in the hangar with keys A–E. They're built into the world, so you can see what you bought:
   - Town refuel stations, $9k: refuel at any town pad.
   - Base dip tank, $6k: a raised open tank at base the bucket can dip in, so no trip to the sea.
   - Fuel farm, $12k: fuel bills −40%.
-  - Maintenance workshop, $15k: repair bills −50%.
   - Fire lookout towers, $18k: three ridge-top towers; new wildfires start as a single cell, without their seed patch.
 - **Discounts live in the bills:** `fuelBill` and `repairBill` in career.js. `career.projects` is saved, and old saves load with none.
 - **Hangar:** a detailed arched hangar replaces the box-and-half-cylinder: corrugated cladding, roof rib bands, sliding doors, an office annex and floodlights.
