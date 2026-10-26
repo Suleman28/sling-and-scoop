@@ -54,6 +54,19 @@
     .menu button span { display: block; margin-top: 2px; font-size: 12px; opacity: .65; }
     .menu button span:empty { display: none; }
     #overlay tr[data-key] { cursor: pointer; } #overlay tr[data-key]:hover td { color: #ffd060; }
+    #overlay.settings { display: block; overflow-y: auto; text-align: left; }
+    #overlay.settings > div { max-width: 940px; margin: 0 auto; }
+    #overlay.settings h1 { font-size: 28px; text-align: center; }
+    #overlay h2 { font-size: 13px; letter-spacing: .15em; text-transform: uppercase; opacity: .6; font-weight: normal; margin: 18px 0 6px; }
+    .ctl { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 4px 28px; }
+    .ctl h3 { margin: 10px 0 4px; font-size: 13px; letter-spacing: .1em; color: #ffd060; }
+    #overlay .ctl table { margin: 0; border-spacing: 0; width: 100%; }
+    .ctl td { padding: 3px 0; vertical-align: middle; border-bottom: 1px solid #fff1; }
+    #overlay .ctl td:first-child { width: 1%; white-space: nowrap; padding-right: 14px; } #overlay .ctl td:last-child { text-align: left; }
+    kbd { font: inherit; font-size: 12px; font-weight: bold; color: #ffd060; background: #fff1; border: 1px solid #fff4; border-bottom-width: 2px; border-radius: 4px; padding: 0 6px; margin-right: 3px; display: inline-block; min-width: 14px; text-align: center; }
+    .opts label { display: flex; align-items: center; gap: 12px; padding: 6px 0; border-bottom: 1px solid #fff1; cursor: pointer; }
+    .opts label span { flex: 1; } .opts input[type=range] { width: min(200px, 45vw); accent-color: #ffb347; } .opts input[type=checkbox] { width: 18px; height: 18px; accent-color: #ffb347; }
+    .opts output { width: 3.5em; text-align: right; color: #ffd060; }
     #help { position: fixed; bottom: 12px; left: 14px; pointer-events: none; opacity: .8; text-shadow: 0 1px 2px #0008; }
   </style>
 </head>
