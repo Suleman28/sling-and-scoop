@@ -5,7 +5,7 @@ import { buildPlane, createPlane, drop, PLANE, stepPlane } from './plane.js';
 import { sfx, startAudio, thud, setVolume, toggleMute, updateAudio } from './audio.js';
 import { makeParticles } from './fx.js';
 import { buildLife } from './life.js';
-import { act, winch, buildRigView, createRig, hangOf, massOf, nearestCrate, placeCrateMesh, RIG, stepCrate, stepRig, swapTool } from './tools.js';
+import { act, winch, buildRigView, splashReach, createRig, hangOf, massOf, nearestCrate, placeCrateMesh, RIG, stepCrate, stepRig, swapTool } from './tools.js';
 import { buildFireView, createFire, douse, resetFire, stepFire } from './fire.js';
 import { AIRFRAMES, applyLoadout, buyOrSelectAirframe, buyUpgrade, loadCareer, recordShift, saveCareer, UPGRADES } from './career.js';
 import { abandon, accept, comboMult, createDispatch, disposeDispatch, onScorch, SHIFT, updateDispatch, updateMarkers } from './missions.js';
@@ -85,9 +85,9 @@ function spawnWash(dt, x, gy, z, alt, onWater, power) {
 const smoke = makeParticles(scene, 700, { opacity: 0.32 });
 const fire = createFire(fuelAt, SEED);
 const fireView = buildFireView(scene, groundAt, smoke);
-const splash = (x, y, z, amount = 1 / 250) => {
+const splash = (x, y, z, amount = 1 / 250, reach) => {
   wash.spawn(x, y + 0.3, z, (Math.random() - 0.5) * 3, 1 + Math.random(), (Math.random() - 0.5) * 3, SPRAY, { life: 0.6, grow: 0.8 });
-  if (douse(fire, x, z, amount) && Math.random() < 0.3) smoke.spawn(x, y + 1, z, wind.x * 0.3, 4 + Math.random() * 3, wind.z * 0.3, 0xf4f1ee, { life: 3, grav: 0.5, drag: 0.3, grow: 3 });
+  if (douse(fire, x, z, amount, reach) && Math.random() < 0.3) smoke.spawn(x, y + 1, z, wind.x * 0.3, 4 + Math.random() * 3, wind.z * 0.3, 0xf4f1ee, { life: 3, grav: 0.5, drag: 0.3, grow: 3 });
 };
 // Aim marker: where a dump would land right now (bucket velocity carried through the fall).
 const aim = new THREE.Mesh(new THREE.RingGeometry(8, 10, 24).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x6fdcff, transparent: true, opacity: 0.6, depthWrite: false, fog: false }));
@@ -108,7 +108,7 @@ function spawnPlaneDrops(amount) {
     const across = (Math.random() - 0.5) * 14, flare = (Math.random() - 0.5) * 6; // spread over most of the wingspan, fanning out
     drops.spawn(s.pos.x + rx * across, s.pos.y - 0.3, s.pos.z + rz * across,
       s.vel.x * 0.85 + rx * flare + (Math.random() - 0.5) * 3, s.vel.y - 2, s.vel.z * 0.85 + rz * flare + (Math.random() - 0.5) * 3, WATER,
-      { life: 6, grav: -9.81, drag: 0.4, grow: 1.6, puff: false, onLand: (x, y, z) => splash(x, y, z, 1 / 70) });
+      { life: 6, grav: -9.81, drag: 0.4, grow: 1.6, puff: false, onLand: (x, y, z) => splash(x, y, z, 1 / 70, PLANE.reach) });
   }
 }
 let dropAcc = 0;
@@ -117,7 +117,7 @@ function spawnDrops(r, amount, rim) {
   for (dropAcc += amount * 250; dropAcc >= 1; dropAcc--) {
     const a = Math.random() * Math.PI * 2, rad = (rim ? 0.85 : Math.random() * 0.5) * sc;
     drops.spawn(r.pos.x + Math.cos(a) * rad, r.pos.y - (rim ? 0.2 : h), r.pos.z + Math.sin(a) * rad,
-      r.vel.x + (Math.random() - 0.5) * 1.5, r.vel.y - 1, r.vel.z + (Math.random() - 0.5) * 1.5, WATER, { life: 4, grav: -9.81, drag: 0.3, grow: 1, puff: false, onLand: splash });
+      r.vel.x + (Math.random() - 0.5) * 1.5 * sc, r.vel.y - 1, r.vel.z + (Math.random() - 0.5) * 1.5 * sc, WATER, { life: 4, grav: -9.81, drag: 0.3, grow: 1, puff: false, onLand: (x, y, z) => splash(x, y, z, 1 / 250, splashReach()) });
   }
 }
 

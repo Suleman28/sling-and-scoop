@@ -33,6 +33,9 @@ export function createRig(x, y, z) {
 // Physical scale of the bucket from water capacity: compact starter bucket (0.72×), growing noticeably with
 // each Water Capacity upgrade and much larger on the Heavy Lifter.
 export const bucketScale = (cap = RIG.cap) => 0.72 * Math.pow(cap, 0.58);
+// Splash rings a bucket's water reaches (see douse): a fuller dump spreads wider, so more water covers more fire
+// instead of over-soaking the same patch. Utility 2 (5x5 cells), Heavy Lifter 3, an upgraded Heavy up to 5.
+export const splashReach = (cap = RIG.cap) => Math.max(2, Math.round(1 + 0.75 * cap));
 
 // Anything the hook can carry: a crate or a person. pos is the top (hook point); spec gives size and mass.
 export function createCrate(x, y, z, spec = RIG.crate) {

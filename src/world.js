@@ -111,6 +111,9 @@ const runwayGap = (x, z, margin = 0) => {
 };
 export const onRunway = (x, z) => runwayGap(x, z) === 0;
 const FLATS = [...PADS, ...SITES];
+// How fully the ground at (x, z) is levelled to pad p: dead flat over the pad and its ring of houses (the base
+// apron, hangar and huts reach further), blending into the land beyond.
+const flatness = (p, x, z) => (p === PAD ? smooth(110, 56, Math.hypot(x - p.x, z - p.z)) : smooth(80, 38, Math.hypot(x - p.x, z - p.z)));
 export const PAD_RADIUS = 11;
 
 // Pad-local offset (x right, z back) to world xz.
@@ -120,7 +123,7 @@ function height(x, z) {
   let y = rawHeight(x, z);
   // Craggy detail up high and gentle lumps on the lowland, so long slopes break into facets.
   y += (noise(x / 48 + 3, z / 48 - 8, 3) - 0.5) * 16 * smooth(40, 140, y) + (noise(x / 90 - 6, z / 90 + 2, 2) - 0.5) * 5 * smooth(2, 25, y);
-  for (const p of FLATS) { const t = smooth(70, 32, Math.hypot(x - p.x, z - p.z)); y = y * (1 - t) + p.y * t; }
+  for (const p of FLATS) y = y * (1 - flatness(p, x, z)) + p.y * flatness(p, x, z);
   const r = smooth(60, 0, runwayGap(x, z, 8)); // airstrip apron, blending into the land (or rising out of the sea) over 60 m
   return y * (1 - r) + RUNWAY.y * r;
 }
@@ -225,7 +228,13 @@ export const ROADS = (() => {
       }
     }
   }
-  for (const [k, { d, y }] of target) { const t = smooth(16, 8, d); H[k] = H[k] * (1 - t) + y * t; }
+  // Pads win: the road bed never lifts or sinks the levelled ground round a pad. The road then rides the final ground.
+  for (const [k, { d, y }] of target) {
+    const x = (k % (SEGS + 1)) * CELL - HALF, z = Math.floor(k / (SEGS + 1)) * CELL - HALF;
+    const t = smooth(16, 8, d) * (1 - Math.max(...FLATS.map((p) => flatness(p, x, z))));
+    H[k] = H[k] * (1 - t) + y * t;
+  }
+  for (const r of roads) for (const p of r) p[2] = heightAt(p[0], p[1]);
   return roads;
 })();
 export const roadDist = (x, z) => Math.min(...ROADS.flat().map(([rx, rz]) => Math.hypot(rx - x, rz - z)));

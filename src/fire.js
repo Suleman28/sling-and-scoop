@@ -10,7 +10,7 @@ export const FIRE = {
   spread: 0.007,              // ignition chance per neighbour per second at full heat and fuel
   windBias: 1.4,              // downwind spread multiplier per 10 m/s of wind
   douse: 4,                   // heat removed per unit of water (a full bucket clears ~3x3 burning cells)
-  splash: [1, 0.6, 0.3],      // share by ring around the hit cell: a full bucket soaks a 5x5 patch (~100 m)
+  reach: 2,                   // splash rings round the hit cell: a full bucket soaks a 5x5 patch (~100 m); bigger buckets reach further
   snuff: 0.2,                 // a doused cell below this heat goes out instead of smouldering
   wetTime: 25,                // seconds a doused cell can't reignite
   minHeat: 0.04,
@@ -69,17 +69,16 @@ export function fireStatus(f, owner) {
   return { n, x: n ? x / n : 0, z: n ? z / n : 0 };
 }
 
-// Water landing at (x, z): full effect on its cell, falling off by ring (FIRE.splash).
+// Water landing at (x, z): full effect on its cell, falling off to 0.3 at the outer ring (reach rings out).
 // Returns true if it hit a burning cell (for steam).
-export function douse(f, x, z, amount) {
+export function douse(f, x, z, amount, R = FIRE.reach) {
   const c0 = cellOf(x, z);
   if (c0 < 0) return false;
   let hit = false;
   const i0 = c0 % N, j0 = Math.floor(c0 / N);
-  const R = FIRE.splash.length - 1;
   for (let j = j0 - R; j <= j0 + R; j++) for (let i = i0 - R; i <= i0 + R; i++) {
     if (i < 0 || j < 0 || i >= N || j >= N) continue;
-    const c = j * N + i, share = FIRE.splash[Math.max(Math.abs(i - i0), Math.abs(j - j0))];
+    const c = j * N + i, share = 1 - (0.7 * Math.max(Math.abs(i - i0), Math.abs(j - j0))) / R;
     f.wet[c] = Math.max(f.wet[c], FIRE.wetTime * share);
     if (!f.burning.has(c)) continue;
     hit ||= c === c0;

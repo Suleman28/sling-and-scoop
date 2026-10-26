@@ -93,3 +93,10 @@ console.log(`shift ok (ignored shift ends at ${a.t.toFixed(0)} s, ${a.stats.lost
   RIG.maxLift = lift;
 }
 console.log('shift variety ok');
+// No pad, apron or house ring sits under the grass: the ground there is level with the pad.
+{
+  const { heightAt, PADS, SITES } = await import('../src/world.js');
+  for (const [p, r] of [[PADS[0], 45], [PADS[1], 14], ...SITES.map((s) => [s, 30])])
+    for (let a = 0; a < 6.28; a += 0.1) for (let d = 0; d <= r; d += 2) assert.ok(heightAt(p.x + Math.cos(a) * d, p.z + Math.sin(a) * d) - p.y < 0.05, `ground over the pad at ${p.name || 'base'}`);
+  console.log('pads level ok');
+}
