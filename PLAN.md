@@ -3,10 +3,7 @@
 
 
 ## Before open-sourcing (decide later)
-- **Name:** something fun with a cheap domain.
-  - "Rotor Relay" is still the working title.
-  - Shortlist: Downwash (no game by that name found), Sling & Scoop, Hotshot Isle.
-  - Avoid "Dispatch" (a big 2025 game), "Longline" (an existing itch.io helicopter long-line game) and "Ember Isle" (taken).
+- **Name:** decided: *Sling & Scoop* (see Resolved decisions). Domain: slingandscoop.com if free; .game was too pricey.
 - **License:** MIT (simplest, recommended), Apache 2.0 or GPL 3.0. `public/sfx/airplane_prop.wav` stays under CC BY 3.0 with its credit.
 - **README banner:** state plainly that this is an experimental project built with AI coding agents (Claude and Gemini Argon), not a production game.
 - **Repo housekeeping:** a short CONTRIBUTING note pointing to AGENTS.md (the conventions and the `inspect.html` model check) and `npm test`.
@@ -77,7 +74,7 @@
 - **Audio:** distinct synth rotor voices per helicopter (`scout`, `utility`, `heavy`) with pad idle-down and bank blade-slap; warm twin-prop synth harmony layered under low-pass filtered `airplane_prop.wav`; water-scooping/dipping spray loop; and procedural action SFX (`hook`, `release`, `swap`, `dump`, `accept`, `done`).
 
 ## Resolved decisions (Phase 1)
-- **Name:** *Rotor Relay* (island: unnamed for now). Chaining dispatches = the relay; avoids "Dispatch", which is an existing game title.
+- **Name:** *Sling & Scoop* (renamed from the working title *Rotor Relay*; repo `sling-and-scoop`). It names the two core jobs, cargo on the hook and water in the bucket. Considered: Downwash, Hotshot Isle. Avoid "Dispatch" (a big 2025 game), "Longline" (an itch.io helicopter game) and "Ember Isle" (taken). localStorage keys keep the old `rotor-relay` names so saves survive. Hosted on Cloudflare (static assets from `dist/` via `wrangler.jsonc`, `NODE_VERSION=22`).
 - **Map:** one main island (~1.8 km across, bays + central ridges) plus three islets, on a 2.8 km square terrain with 10 m cells (157k tris, one draw call). Fixed map seed `1337` so the career island stays learnable.
 - **Daily seed:** yes for v1. It drives the *shift* (incident director, fire spread, wind timing), not the terrain. Built in Phase 4.
 - **Palette:** warm dusk. Low sun over the sea, peach horizon to indigo zenith, teal water, olive/ochre grass, mauve rock. Chopper is cream/teal with an orange fin so it never blends with fire.

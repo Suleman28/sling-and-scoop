@@ -1,0 +1,5 @@
+{
+  "name": "sling-and-scoop",
+  "compatibility_date": "2026-10-23",
+  "assets": { "directory": "./dist" }
+}

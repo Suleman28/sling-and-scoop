@@ -250,7 +250,7 @@ let mode = 'title', dispatch = null, backTo = 'title', resumeTo = 'free';
 const overlay = document.getElementById('overlay'), meter = document.getElementById('meter');
 let resultsHtml = '';
 const btn = (key, label, sub = '') => `<button data-key="${key}"><b>${key === 'Escape' ? 'Esc' : key.replace(/^(Digit|Key)/, '')}</b>${label}<span>${sub}</span></button>`;
-const menuHtml = () => `<h1>ROTOR RELAY</h1><p class="tag">Island air dispatch</p><nav class="menu">
+const menuHtml = () => `<h1>SLING &amp; SCOOP</h1><p class="tag">Island air dispatch</p><nav class="menu">
   ${btn('Digit1', 'Start shift', 'Fight wildfires, sling cargo, pull people out of trouble')}
   ${btn('Digit2', 'Free roam', 'No calls, no clock, unlimited fuel')}
   ${btn('Digit3', 'Hangar', `Bank $${career.bank.toLocaleString()}`)}
@@ -491,7 +491,7 @@ renderer.setAnimationLoop((now) => {
   const load = isPlane() ? `THR    ${bar(s.throttle)} ${Math.round(s.throttle * 100)}%\nTANK   ${bar(s.water / PLANE.tank)} ${Math.round((s.water / PLANE.tank) * 100)}%`
     : !hasLine() ? 'LINE   none (rescues only)'
     : `${rig.tool === 'bucket' ? `BUCKET ${bar(rig.water / RIG.cap)} ${Math.round((rig.water / RIG.cap) * 100)}%` : `HOOK   ${held}`}\nLINE   ${rig.len <= 0.15 ? 'stowed' : `${rig.len.toFixed(1)} m`} (Z/C)`;
-  hud.textContent = `ROTOR RELAY\nALT ${alt.toFixed(0).padStart(4)} m\nSPD ${(speed * 3.6).toFixed(0).padStart(4)} km/h\nV/S ${s.vel.y.toFixed(1).padStart(5)} m/s\nWND ${wind.str.toFixed(0).padStart(4)} m/s\nFUEL   ${bar(s.fuel)} ${Math.round(s.fuel * 100)}%\n${load}${opts.fps ? `\n${fps} fps` : ''}`;
+  hud.textContent = `SLING & SCOOP\nALT ${alt.toFixed(0).padStart(4)} m\nSPD ${(speed * 3.6).toFixed(0).padStart(4)} km/h\nV/S ${s.vel.y.toFixed(1).padStart(5)} m/s\nWND ${wind.str.toFixed(0).padStart(4)} m/s\nFUEL   ${bar(s.fuel)} ${Math.round(s.fuel * 100)}%\n${load}${opts.fps ? `\n${fps} fps` : ''}`;
   if (frames % 15 === 0) board.innerHTML = boardHtml(goal);
   if (onShift()) meter.innerHTML = meterHtml();
   updateCompass(goal, dispatch?.job?.type);

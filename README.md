@@ -1,4 +1,4 @@
-# Rotor Relay
+# Sling & Scoop
 
 A low-poly island air-dispatch game for the browser: fight wildfires, sling cargo and pull people out of trouble in escalating shifts, then spend your pay on upgrades, helicopters and a water bomber.
 

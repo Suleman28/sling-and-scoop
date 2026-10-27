@@ -1,4 +1,4 @@
-# AGENTS.md — Rotor Relay
+# AGENTS.md — Sling & Scoop
 
 Context for AI coding agents working on this repo. Read this first, then `PLAN.md` (design + every resolved decision, newest first).
 
