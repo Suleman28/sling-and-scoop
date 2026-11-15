@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🚁 Sling & Scoop
+<img src="docs/logo.svg" alt="Sling &amp; Scoop" width="420" />
 
 **A low-poly island air-dispatch game for the browser, built entirely by AI models.**
 
@@ -75,12 +75,12 @@ How much AI compute has gone into this game so far, across Claude Code and Antig
 <!-- tokens:start -->
 | Model | Calls | Input | Cache write | Cache read | Output |
 |---|--:|--:|--:|--:|--:|
-| Gemini (Antigravity, all models) | 1,750 | 10,553,603 | 0 | 173,881,092 | 1,164,168 |
+| Gemini (Antigravity, all models) | 1,756 | 10,569,426 | 0 | 174,584,801 | 1,168,319 |
 | claude-opus-5-5 | 886 | 1,864 | 3,081,089 | 303,800,171 | 1,134,719 |
 | claude-sonnet-5-5 | 326 | 674 | 1,173,172 | 24,181,203 | 299,948 |
 | claude-fable-5-2 | 129 | 276 | 745,708 | 38,516,817 | 228,325 |
 | claude-haiku-5-5 | 6 | 12 | 87,341 | 233,539 | 5,202 |
-| **Total** | 3,097 | 10,556,429 | 5,087,310 | 540,612,822 | **2,832,362** |
+| **Total** | 3,103 | 10,572,252 | 5,087,310 | 541,316,531 | **2,836,513** |
 
 _Updated 2026-11-15 by `npm run tokens`. Cache read is the same context re-read each call, so it dominates; output is what the models wrote._
 <!-- tokens:end -->
