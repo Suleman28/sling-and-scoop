@@ -712,8 +712,18 @@ const rankLine = (gained = 0) => {
     <span class="dim">Next: <b>${next.name}</b> unlocks ${next.unlocks}</span>`;
 };
 const track = (name, props) => { try { window.plausible?.(name, props ? { props } : undefined); } catch {} };
+let pilotsOnline = 0;
+const refreshOnline = () => fetch('/api/online').then((r) => (r.ok ? r.json() : null)).then((d) => {
+  const next = d && typeof d.online === 'number' ? d.online : 0;
+  if (next !== pilotsOnline) {
+    pilotsOnline = next;
+    if (mode === 'title') render(menuHtml(), 'title');
+  }
+}).catch(() => {});
+refreshOnline();
+setInterval(() => { if (!document.hidden) refreshOnline(); }, 30000);
 
-const LOGO = `<svg viewBox="0 0 436 116" role="img" aria-label="Sling &amp; Scoop">
+const LOGO = `<svg viewBox="0 0 444 116" role="img" aria-label="Sling &amp; Scoop">
   <defs>
     <clipPath id="badgeClip">
       <polygon points="22,6 92,6 108,22 108,90 92,106 22,106 6,90 6,22"/>
@@ -795,15 +805,15 @@ const LOGO = `<svg viewBox="0 0 436 116" role="img" aria-label="Sling &amp; Scoo
     <text x="128" y="92" font-size="34" fill="#0d0919">&amp;</text>
     <text x="125" y="88" font-size="34" fill="#f2763a" stroke="#140f26" stroke-width="5" paint-order="stroke" stroke-linejoin="round">&amp;</text>
 
-    <text x="163" y="93" font-size="45" fill="#0d0919">SCOOP</text>
-    <text x="160" y="89" font-size="45" fill="url(#gScoop)" stroke="#140f26" stroke-width="6" paint-order="stroke" stroke-linejoin="round">SCOOP</text>
+    <text x="173" y="93" font-size="45" fill="#0d0919">SCOOP</text>
+    <text x="170" y="89" font-size="45" fill="url(#gScoop)" stroke="#140f26" stroke-width="6" paint-order="stroke" stroke-linejoin="round">SCOOP</text>
   </g>
 
   <!-- Sweeping Scoop Wake -->
-  <path d="M120 101 C182 97 238 102 308 98 C358 95 394 97 424 89 C404 102 356 105 292 106 C214 107 156 104 120 101 Z" fill="url(#gWake)"/>
-  <path d="M120 101 C182 97 238 102 308 98 C358 95 394 97 424 89" fill="none" stroke="url(#gCrest)" stroke-width="2.6" stroke-linecap="round"/>
+  <path d="M120 101 C184 97 242 102 314 98 C366 95 402 97 432 89 C412 102 364 105 298 106 C218 107 158 104 120 101 Z" fill="url(#gWake)"/>
+  <path d="M120 101 C184 97 242 102 314 98 C366 95 402 97 432 89" fill="none" stroke="url(#gCrest)" stroke-width="2.6" stroke-linecap="round"/>
 </svg>`;
-const menuHtml = () => `<div class="brand">${LOGO}</div><p class="tag">Island air dispatch</p><nav class="menu">
+const menuHtml = () => `<div class="brand">${LOGO}</div><p class="tag">Island air dispatch${pilotsOnline > 0 ? ` · <span class="online"><b>${pilotsOnline}</b> ${pilotsOnline === 1 ? 'player' : 'players'} online</span>` : ''}</p><nav class="menu">
   ${btn('Digit1', 'Start shift', 'Fight wildfires, sling cargo, pull people out of trouble')}
   ${btn('Digit2', 'Free roam', 'No calls, no clock, unlimited fuel')}
   ${btn('Digit3', 'Hangar', `Bank $${career.bank.toLocaleString()}`)}
@@ -1284,7 +1294,7 @@ renderer.setAnimationLoop((now) => {
     : rig.stowed ? 'LINE   stowed (R to let it out)'
     : !hasLine() ? 'LINE   none (rescues only)'
     : `${rig.tool === 'bucket' ? `BUCKET ${bar(rig.water / RIG.cap)} ${Math.round((rig.water / RIG.cap) * 100)}%` : `HOOK   ${held}`}\nLINE   ${rig.len <= 0.15 ? 'stowed' : `${rig.len.toFixed(1)} m`} (Z/C)`;
-  hud.textContent = `SLING & SCOOP\nALT ${alt.toFixed(0).padStart(4)} m\nSPD ${(speed * 3.6).toFixed(0).padStart(4)} km/h\nV/S ${s.vel.y.toFixed(1).padStart(5)} m/s\nWND ${wind.str.toFixed(0).padStart(4)} m/s${weather.storm > 0.05 ? ' SQUALL' : ''}\nFUEL   ${bar(s.fuel)} ${Math.round(s.fuel * 100)}%\n${s.damage > 0.005 ? `HULL   ${bar(1 - s.damage)} ${Math.round((1 - s.damage) * 100)}%\n` : ''}${load}${opts.fps ? `\n${fps} fps` : ''}`;
+  hud.textContent = `SLING & SCOOP\nALT ${alt.toFixed(0).padStart(4)} m\nSPD ${(speed * 3.6).toFixed(0).padStart(4)} km/h\nV/S ${s.vel.y.toFixed(1).padStart(5)} m/s\nWND ${wind.str.toFixed(0).padStart(4)} m/s${weather.storm > 0.05 ? ' SQUALL' : ''}\nFUEL   ${bar(s.fuel)} ${Math.round(s.fuel * 100)}%\n${s.damage > 0.005 ? `HULL   ${bar(1 - s.damage)} ${Math.round((1 - s.damage) * 100)}%\n` : ''}${load}${opts.fps ? `\n${fps} fps` : ''}${pilotsOnline > 0 ? `\n● ${pilotsOnline} ${pilotsOnline === 1 ? 'player' : 'players'} online` : ''}`;
   if (frames % 15 === 0) { patch(board, boardHtml(goal)); setHelp(); }
   if (frames % 6 === 0) drawMini(goal);
   if (onShift()) patch(meter, meterHtml());
