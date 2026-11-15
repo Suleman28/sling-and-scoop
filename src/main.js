@@ -712,16 +712,6 @@ const rankLine = (gained = 0) => {
     <span class="dim">Next: <b>${next.name}</b> unlocks ${next.unlocks}</span>`;
 };
 const track = (name, props) => { try { window.plausible?.(name, props ? { props } : undefined); } catch {} };
-let pilotsOnline = 0;
-const refreshOnline = () => fetch('/api/online').then((r) => (r.ok ? r.json() : null)).then((d) => {
-  const next = d && typeof d.online === 'number' ? d.online : 0;
-  if (next !== pilotsOnline) {
-    pilotsOnline = next;
-    if (mode === 'title') render(menuHtml(), 'title');
-  }
-}).catch(() => {});
-refreshOnline();
-setInterval(() => { if (!document.hidden) refreshOnline(); }, 30000);
 
 const LOGO = `<svg viewBox="0 0 436 116" role="img" aria-label="Sling &amp; Scoop">
   <defs>
@@ -813,7 +803,7 @@ const LOGO = `<svg viewBox="0 0 436 116" role="img" aria-label="Sling &amp; Scoo
   <path d="M120 101 C182 97 238 102 308 98 C358 95 394 97 424 89 C404 102 356 105 292 106 C214 107 156 104 120 101 Z" fill="url(#gWake)"/>
   <path d="M120 101 C182 97 238 102 308 98 C358 95 394 97 424 89" fill="none" stroke="url(#gCrest)" stroke-width="2.6" stroke-linecap="round"/>
 </svg>`;
-const menuHtml = () => `<div class="brand">${LOGO}</div><p class="tag">Island air dispatch${pilotsOnline > 0 ? ` · <span class="online"><b>${pilotsOnline}</b> ${pilotsOnline === 1 ? 'player' : 'players'} online</span>` : ''}</p><nav class="menu">
+const menuHtml = () => `<div class="brand">${LOGO}</div><p class="tag">Island air dispatch</p><nav class="menu">
   ${btn('Digit1', 'Start shift', 'Fight wildfires, sling cargo, pull people out of trouble')}
   ${btn('Digit2', 'Free roam', 'No calls, no clock, unlimited fuel')}
   ${btn('Digit3', 'Hangar', `Bank $${career.bank.toLocaleString()}`)}
