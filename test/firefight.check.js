@@ -21,7 +21,7 @@ function rngOf(seed) { let a = seed; return () => ((a = (Math.imul(a, 1664525) +
 function start(cls, seed) {
   const rng = rngOf(seed), f = createFire(fuelAt, seed);
   for (let i = 0; i < 400; i++) {
-    const site = SITES[Math.floor(rng() * SITES.length)], a = rng() * Math.PI * 2, r = 150 + rng() * 300;
+    const main = SITES.filter((s) => !s.islet), site = main[Math.floor(rng() * main.length)], a = rng() * Math.PI * 2, r = 150 + rng() * 300;
     const x = site.x + Math.cos(a) * r, z = site.z + Math.sin(a) * r, c = cellOf(x, z);
     if (fuelAt(x, z) < 0.75 || !ignite(f, c, 1)) continue;
     f.rate.set(1, cls.rate);

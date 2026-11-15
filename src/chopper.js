@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { mergeGeometries, toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js';
 
 // Arcade tuning. Speeds in m/s, angles in rad.
 export const TUNE = {
@@ -7,13 +7,20 @@ export const TUNE = {
   drag: 0.04, drag2: 0.0021,        // linear + quadratic forward drag
   brake: 0.5,                       // extra drag when stick is centred
   slip: 2.0,                        // sideways velocity damping
-  grip: 0.8,                        // share of yaw that drags velocity round with it
+  grip: 0.88,                       // share of yaw that drags velocity round with it
   strafe: 14,                       // sideways cruise speed on Q/E
   windPush: 0.2,                    // wind m/s -> drift accel
   bounce: 0.4,                      // restitution off cliffs and trees
   yawRate: 1.5, climb: 14, descend: 12, ceiling: 420, bound: 1650,
   burn: 1 / 540,                    // fuel per airborne second at hover (full tank ~9 min hover, ~6 min busy flying)
-  autorotate: 6,                    // sink rate with a dry tank
+  autorotate: 6,                    // sink rate with a dry tank, gliding; a hover with no engine sinks 1.6x faster
+  flare: 2.5,                       // seconds of stored rotor energy an autorotation flare (hold climb) can spend
+  spool: 1.6,                       // rotor spool-up per second from ground idle (0.6) before it bites
+  fuelLift: 0.08,                   // extra climb with an empty tank (fuel is weight)
+  vrsSink: 9, vrsSpeed: 8, vrsTime: 2.5, // vortex ring state: sinking faster than vrsSink below vrsSpeed airspeed for vrsTime
+  thermal: 60, updraft: 3, buffet: 5,    // over a fire: felt below this height, lift (m/s) and turbulence (m/s^2) at the flames
+  skid: 0.25,                       // share of a hard touchdown the skids spring back
+  slide: 0.5,                       // ground slope (rise/run) the skids start sliding on
   loadClimb: 0.4,                   // climb lost per unit of slung load mass
   bank: 0.35,
   agility: 1.0,                     // attitude & collective response multiplier per airframe
@@ -22,16 +29,24 @@ export const TUNE = {
 const G = 9.81;
 
 export function createFlight(x, y, z, yaw) {
-  return { pos: new THREE.Vector3(x, y, z), vel: new THREE.Vector3(), yaw, pitch: 0, roll: 0, yawVel: 0, grounded: true, hit: 0, fuel: 1, rotorTiltX: 0, rotorTiltZ: 0 };
+  return { pos: new THREE.Vector3(x, y, z), vel: new THREE.Vector3(), yaw, pitch: 0, roll: 0, yawVel: 0, grounded: true, hit: 0, fuel: 1, rotorTiltX: 0, rotorTiltZ: 0, rpm: 0.6, vrs: 0, rotorE: 1, buffet: 0, t: 0, gx: 0, gz: 0 };
 }
 
 // input: { fwd, turn, lift, strafe } each in [-1, 1].
-// env: { groundAt(x, z), wind?: {x, z}, trees?(pos, vel) -> closing speed, loadMass? }. Sets s.hit to the step's worst impact speed.
+// env: { groundAt(x, z), wind?: {x, z}, trees?(pos, vel) -> closing speed, loadMass?, burning?(x, z) }. Sets s.hit to the step's worst impact speed.
+// Beyond the arcade core it models: rotor spool-up, fuel weight, ground effect and translational lift, vortex ring
+// state (s.vrs 0..1), fire thermals (s.buffet 0..1), autorotation with a flare (s.rotorE), sprung skids and slopes.
 export function stepFlight(s, input, dt, env) {
   const T = TUNE, load = env.loadMass || 0, strain = Math.max(0, load - 1) * T.loadClimb, ag = (T.agility || 1) / (1 + strain * 0.8);
   const k = (rate) => 1 - Math.exp(-rate * dt);
-  const lift = s.fuel > 0 ? input.lift : 0;
+  const pw = env.power ?? 1; // engine health: a damaged airframe makes less power
+  const lift = s.fuel > 0 ? input.lift : 0, clamp = (v) => Math.min(1, Math.max(0, v));
   const air = !s.grounded || lift > 0, strafe = air ? input.strafe || 0 : 0;
+  s.t += dt;
+  // Parked, the rotor idles; it has to spool back up before the collective bites.
+  s.rpm = s.fuel <= 0 ? 0.6 : air ? Math.min(1, s.rpm + T.spool * dt) : Math.max(0.6, s.rpm - 0.3 * dt);
+  // On the ground the skids sit on the slope: pitch and roll follow the terrain under them.
+  const slopeF = s.grounded ? s.gx * -Math.sin(s.yaw) + s.gz * -Math.cos(s.yaw) : 0, slopeR = s.grounded ? s.gx * Math.cos(s.yaw) - s.gz * Math.sin(s.yaw) : 0;
 
   // Work in heading space so turns carve instead of skating.
   let fx = -Math.sin(s.yaw), fz = -Math.cos(s.yaw);
@@ -42,7 +57,7 @@ export function stepFlight(s, input, dt, env) {
   const wFwd = w.x * fx + w.z * fz, wRight = w.x * -fz + w.z * fx;
   const flare = air && input.fwd === 0 ? -Math.min(0.16, Math.max(-0.16, vf * 0.005)) : 0;
   const pitchCmd = air ? input.fwd * T.maxPitch : 0;
-  s.pitch += (pitchCmd + flare - wFwd * 0.003 - s.pitch) * k(3.5 * ag);
+  s.pitch += (pitchCmd + flare - wFwd * 0.003 - Math.atan(slopeF) - s.pitch) * k(s.grounded ? 8 : 5.0 * ag);
   const speed = Math.hypot(s.vel.x, s.vel.z);
   // Tail fin weathercocks gently in crosswinds while airborne.
   const weathercock = air && speed > 2 ? -wRight * 0.006 : 0;
@@ -57,7 +72,7 @@ export function stepFlight(s, input, dt, env) {
     vr = s.vel.x * -fz + s.vel.z * fx;
   }
 
-  if (air) vf += Math.sin(pitchCmd || s.pitch) * G * (T.thrust / (1 + strain * 1.4)) * dt;
+  if (air) vf += Math.sin(s.pitch) * G * ((T.thrust * pw) / (1 + strain * 1.4)) * dt;
   vf -= vf * (T.drag + strain * 0.08 + T.drag2 * Math.abs(vf) + (input.fwd === 0 ? T.brake : 0)) * dt;
   vr += (strafe * (T.strafe / (1 + strain)) - vr) * k((strafe ? 1.5 : T.slip) * (0.7 + 0.3 * ag));
   s.vel.x = fx * vf - fz * vr;
@@ -70,10 +85,32 @@ export function stepFlight(s, input, dt, env) {
   const etl = air && lift > 0 && speed > 10 ? Math.min(0.1, (speed - 10) / 250) : 0;
 
   if (air) s.fuel = Math.max(0, s.fuel - dt * T.burn * (1 + 0.5 * Math.max(0, lift) + (0.3 * speed) / 50 + 0.5 * load));
-  let vyTarget = lift > 0 ? lift * T.climb * (1 + ige + etl - Math.min(0.78, T.loadClimb * load)) : lift * T.descend;
-  if (s.fuel <= 0) vyTarget = -T.autorotate * (1 - ige * 1.5);
+  let vyTarget = lift > 0 ? lift * T.climb * pw * clamp((s.rpm - 0.8) / 0.2) * (1 + ige + etl + T.fuelLift * (1 - s.fuel) - Math.min(0.78, T.loadClimb * load)) : lift * T.descend;
+  // Vortex ring state: sink fast with no airspeed for a while and the rotor settles into its own downwash. The
+  // collective barely helps and, once developed, it holds until you fly forward (or sideways) into clean air.
+  s.vrs = clamp(s.vrs + (air && s.fuel > 0 && alt > 10 && s.vel.y < -T.vrsSink * (s.vrs > 0.5 ? 0.45 : 1) && speed < T.vrsSpeed ? dt / T.vrsTime : -2 * dt));
+  if (s.vrs > 0) {
+    const v = s.vrs * s.vrs; // builds gently: a short drop to land barely feels it
+    vyTarget = Math.max(-T.descend - 5, Math.min(vyTarget, vyTarget * (1 - 0.95 * v)) - 7 * v);
+    s.pitch += Math.sin(s.t * 31) * 0.5 * v * dt; s.roll += Math.sin(s.t * 23 + 1) * 0.7 * v * dt;
+  }
+  // Fire thermals: hot air over burning ground lifts and buffets a low helicopter.
+  s.buffet = air && alt < T.thermal && env.burning?.(s.pos.x, s.pos.z) ? 1 - alt / T.thermal : 0;
+  if (s.buffet > 0) {
+    vyTarget += T.updraft * s.buffet;
+    s.vel.x += Math.sin(s.t * 7.3) * T.buffet * s.buffet * dt; s.vel.z += Math.sin(s.t * 5.9 + 2) * T.buffet * s.buffet * dt;
+    s.pitch += Math.sin(s.t * 17) * 0.4 * s.buffet * dt; s.roll += Math.sin(s.t * 13 + 1) * 0.6 * s.buffet * dt;
+  }
+  // Engine out: the rotor windmills. Airspeed keeps the sink gentle; holding climb spends the rotor's stored energy
+  // (a few seconds' worth, slowly won back in the glide) to flare before touchdown.
+  if (s.fuel <= 0) {
+    const flaring = input.lift > 0 && s.rotorE > 0 && !s.grounded;
+    s.rotorE = clamp(s.rotorE + (flaring ? -dt / T.flare : s.grounded || input.lift > 0 ? 0 : dt / (T.flare * 4)));
+    vyTarget = -T.autorotate * (1.6 - 0.6 * Math.min(1, speed / 15)) * (1 - ige * 1.5) * (flaring ? 0.15 : 1);
+  } else s.rotorE = 1;
   if (s.pos.y > T.ceiling) vyTarget = Math.min(vyTarget, (T.ceiling - s.pos.y) * 0.5);
-  s.vel.y += (vyTarget - s.vel.y) * k(2.5 * (0.75 + 0.25 * ag));
+  if (s.sprung > 0 && lift <= 0) { s.sprung -= dt; s.vel.y -= G * dt; } // bounced off the skids: falls back unless you catch it
+  else { s.sprung = 0; s.vel.y += (vyTarget - s.vel.y) * k(2.5 * (0.75 + 0.25 * ag)); }
 
   // Soft world edge: push back toward the island.
   const r = Math.hypot(s.pos.x, s.pos.z);
@@ -86,14 +123,17 @@ export function stepFlight(s, input, dt, env) {
   if (s.pos.y < gNew) {
     s.hit = Math.max(0, -s.vel.y);
     s.pos.y = gNew;
-    if (s.vel.y < 0) s.vel.y = 0;
+    if (s.vel.y < 0) { s.sprung = s.hit > 4 ? 1 : 0; s.vel.y = s.sprung ? s.hit * T.skid : 0; } // a hard touchdown springs back off the skids
   }
+  s.gx = s.gz = 0;
   if (contact) {
     // Steep ground (cliff face) bounces you back; gentle ground is scraped over below.
     const gx = (groundAt(s.pos.x + 1, s.pos.z) - groundAt(s.pos.x - 1, s.pos.z)) / 2;
     const gz = (groundAt(s.pos.x, s.pos.z + 1) - groundAt(s.pos.x, s.pos.z - 1)) / 2;
     const steep = Math.hypot(gx, gz);
+    s.gx = gx; s.gz = gz;
     if (steep > 0.75) s.hit = Math.max(s.hit, reflect(s.vel, -gx / steep, -gz / steep, T.bounce));
+    else if (steep > T.slide) { s.vel.x -= gx * G * 0.6 * dt; s.vel.z -= gz * G * 0.6 * dt; } // too steep to hold: slide downhill
   }
   if (env.trees) s.hit = Math.max(s.hit, env.trees(s.pos, s.vel));
 
@@ -121,10 +161,10 @@ export function stepFlight(s, input, dt, env) {
     const f = Math.exp(-1.5 * dt); s.vel.x *= f; s.vel.z *= f;
   }
   s.grounded = contact && hs <= 6;
-  if (s.grounded && lift <= 0) { const f = Math.exp(-6 * dt); s.vel.x *= f; s.vel.z *= f; }
+  if (s.grounded && lift <= 0) { const f = Math.exp(-(Math.hypot(s.gx, s.gz) > T.slide ? 0.8 : 6) * dt); s.vel.x *= f; s.vel.z *= f; }
 
-  const bankTarget = s.grounded ? 0 : s.yawVel * T.bank * Math.min(1, Math.abs(vf) / 18) - vr * 0.024 - strafe * 0.09 + wRight * 0.004;
-  s.roll += (bankTarget - s.roll) * k(4.5 * ag);
+  const bankTarget = s.grounded ? Math.atan(slopeR) : s.yawVel * T.bank * Math.min(1, Math.abs(vf) / 18) - vr * 0.024 - strafe * 0.09 + wRight * 0.004;
+  s.roll += (bankTarget - s.roll) * k(s.grounded ? 8 : 4.5 * ag);
 
   // Rotor disc leads cyclic input and flares opposite to velocity when braking.
   s.rotorTiltX = (s.rotorTiltX || 0) + ((air ? -input.fwd * 0.1 - flare * 0.35 : 0) - (s.rotorTiltX || 0)) * k(10);
@@ -141,7 +181,7 @@ export function reflect(vel, nx, nz, e) {
 }
 
 // Bake geometry parts into one flat-coloured buffer (one draw call per moving piece).
-export function bodyBaker() {
+export function bodyBaker(crease = 0) {
   const parts = [], c = new THREE.Color();
   // color: hex, or fn(x, y, z) of each face's centre. per = 6 paints whole quads (triangle pairs) for clean edges.
   const add = (geo, color, x = 0, y = 0, z = 0, per = 3) => {
@@ -154,7 +194,7 @@ export function bodyBaker() {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', p);
     g.setAttribute('color', new THREE.BufferAttribute(col, 3));
-    parts.push(g);
+    parts.push(crease ? toCreasedNormals(g, crease) : g);
   };
   return { add, geometry: () => mergeGeometries(parts) };
 }
@@ -374,11 +414,63 @@ const BODIES = {
   },
 };
 
-// kind: 'utility' | 'scout' | 'heavy'; body/trim: livery colours.
-export function buildChopper({ kind = 'utility', body = CREAM, trim = TEAL, scale = 1 } = {}) {
+// kind: 'utility' | 'scout' | 'heavy'; body/trim: livery colours; tank: Heavy Lifter belly fire tank + snorkel.
+export function buildChopper({ kind = 'utility', body = CREAM, trim = TEAL, scale = 1, tank = false } = {}) {
   const mat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.55 });
   const b = bodyBaker(), spec = BODIES[kind](b, body, trim), group = new THREE.Group();
-  group.add(new THREE.Mesh(b.geometry(), mat));
+  if (kind === 'heavy' && tank) {
+    // Bolt-on modular saddle straddling the overhead spine (y = 3.3..3.7) with external clamp brackets,
+    // hi-vis lock latches, and the starboard turbo-pump / snorkel reel pod.
+    b.add(new THREE.BoxGeometry(1.66, 0.36, 7.6), DARK, 0, 3.28, 0.65);
+    b.add(new THREE.BoxGeometry(1.72, 0.14, 7.4), trim, 0, 3.48, 0.65);                                   // module top rim
+    for (const z of [-2.4, -0.6, 1.2, 3.0]) {
+      b.add(new THREE.BoxGeometry(1.82, 0.44, 0.18), body, 0, 3.38, z);                                   // spine clamp ribs
+      for (const sx of [-0.88, 0.88]) b.add(new THREE.BoxGeometry(0.12, 0.24, 0.22), ORANGE, sx, 3.54, z); // lock latches
+    }
+    b.add(new THREE.CylinderGeometry(0.26, 0.28, 1.15, 8).rotateX(Math.PI / 2), DARK, 0.92, 3.16, -0.4);   // starboard turbo-pump barrel
+    b.add(new THREE.CylinderGeometry(0.3, 0.3, 0.22, 8).rotateX(Math.PI / 2), ORANGE, 0.92, 3.16, -0.95);  // pump intake collar
+    b.add(new THREE.CylinderGeometry(0.28, 0.28, 0.24, 8).rotateZ(Math.PI / 2), ORANGE, 0.92, 3.16, 0.15); // hose reel drum
+    b.add(new THREE.CylinderGeometry(0.15, 0.15, 0.52, 8).rotateZ(Math.PI / 2), DARK, 0.64, 3.16, -0.4);   // cross-feed manifold into tank
+  }
+  const bodyMesh = new THREE.Mesh(b.geometry(), mat);
+  bodyMesh.castShadow = bodyMesh.receiveShadow = true;
+  group.add(bodyMesh);
+  let snorkel = null, bladder = null, bladderFill = 0;
+  if (kind === 'heavy' && tank) {
+    // Baffled inflatable Air-Crane belly tank: flat top (y = 0) locked flush into the spine saddle,
+    // 4 pressurized fabric lobes pinched by hi-vis orange harness straps, and a twin-door belly dump box.
+    const bb = bodyBaker();
+    const prof = [[0, -4.05], [0.98, -3.72], [1.24, -2.95], [1.3, -1.55], [1.28, 0.05], [1.18, 1.8], [0.94, 3.1], [0.5, 3.85], [0, 4.1]];
+    const pod = new THREE.LatheGeometry(prof.map(([r, z]) => new V(r, z)), 14).rotateX(Math.PI / 2).scale(0.96, 1.92, 1).toNonIndexed();
+    const pp = pod.attributes.position;
+    for (let i = 0; i < pp.count; i++) {
+      const py = pp.getY(i), pz = pp.getZ(i);
+      if (py > 0) pp.setY(i, 0);
+      else {
+        // Pinch the bladder slightly at each baffle ring so it reads as pressurized inflatable cells
+        const pinch = 1 - 0.09 * (Math.exp(-(((pz + 1.8) / 0.26) ** 2)) + Math.exp(-(((pz + 0.1) / 0.26) ** 2)) + Math.exp(-(((pz - 1.6) / 0.26) ** 2)));
+        pp.setX(i, pp.getX(i) * pinch);
+        pp.setY(i, py * pinch);
+      }
+    }
+    pod.computeVertexNormals();
+    bb.add(pod, (x, y, z) => {
+      if (Math.abs(z + 1.8) < 0.12 || Math.abs(z + 0.1) < 0.12 || Math.abs(z - 1.6) < 0.12) return ORANGE; // baffle tension straps
+      return trim;
+    }, 0, 0, 0, 6);
+    bladder = new THREE.Mesh(bb.geometry(), mat);
+    bladder.position.set(0, 3.30, 0.65);
+    bladder.castShadow = bladder.receiveShadow = true;
+    group.add(bladder);
+
+    // Stowed snorkel pipe docked solidly into the starboard turbo-pump housing (never floats when empty).
+    const sb = bodyBaker();
+    sb.add(new THREE.CylinderGeometry(0.105, 0.105, 3.5, 8).rotateX(Math.PI / 2), DARK, 0, 0, 1.75);
+    sb.add(new THREE.CylinderGeometry(0.19, 0.15, 0.4, 8).rotateX(Math.PI / 2), ORANGE, 0, 0, 3.6);
+    snorkel = new THREE.Mesh(sb.geometry(), mat);
+    snorkel.position.set(0.92, 3.16, 0.1);
+    group.add(snorkel);
+  }
 
   const R = spec.rotor, rb = bodyBaker();
   rb.add(new THREE.CylinderGeometry(0.24, 0.28, 0.22, 8), DARK);
@@ -434,6 +526,12 @@ export function buildChopper({ kind = 'utility', body = CREAM, trim = TEAL, scal
     disc.rotation.set(tx, 0, tz);
     tail.rotation.x = spinA * 1.7;
     disc.material.opacity = Math.max(0, (rpm - 0.35) * 0.14 + 0.05 * power);
+    if (bladder) {
+      const targetFill = s ? Math.min(1, Math.max(0, s.tankFill || 0)) : 0.95;
+      bladderFill += (targetFill - bladderFill) * (1 - Math.exp(-8 * dt));
+      bladder.scale.set(0.72 + 0.28 * bladderFill, 0.16 + 0.84 * bladderFill, 0.94 + 0.06 * bladderFill);
+    }
+    if (snorkel) snorkel.visible = !s?.snorkelOut;
   };
   return { group, rotor, tail, disc, beacon, strobe, spin };
 }

@@ -8,12 +8,14 @@ const G = 9.81;
 export const RIG = {
   bucket: { line: 9, hang: 1.2, mass: 0.08, radius: 0.9 },   // hang: rope end to bottom of the load
   hook: { line: 10, hang: 0.4, mass: 0.05, radius: 0.3 },
-  crate: { hang: 1.6, mass: 0.6, radius: 1.1 },              // masses are relative to the chopper (1)
-  person: { hang: 1.8, mass: 0.15, radius: 0.4 },
+  snorkel: { line: 10, hang: 0.45, mass: 0.1, radius: 0.35 },
+  // box: physics half-extents of the load's body, which sits on its bottom (hang below the hook point).
+  crate: { hang: 1.6, mass: 0.6, radius: 1.1, box: [0.71, 0.58, 0.71] }, // masses are relative to the chopper (1)
+  person: { hang: 1.8, mass: 0.15, radius: 0.4, box: [0.3, 0.8, 0.2], draft: 0.08 }, // draft: share of its height under water when afloat (default 0.4)
   // Heavy cargo: cargo is its name, pay multiplies the job reward.
-  container: { hang: 2.2, mass: 1.6, radius: 1.6, cargo: 'container', label: 'Heavy container', pay: 2.5 },
-  vehicle: { hang: 1.9, mass: 2.0, radius: 2.2, cargo: 'wrecked vehicle', label: 'Vehicle recovery', pay: 3 },
-  cabin: { hang: 3.4, mass: 2.4, radius: 2.6, cargo: 'prefab cabin', label: 'Prefab cabin', pay: 3.5 },
+  container: { hang: 2.2, mass: 1.6, radius: 1.6, cargo: 'container', label: 'Heavy container', pay: 2.5, box: [1.05, 0.77, 1.6] },
+  vehicle: { hang: 1.9, mass: 2.0, radius: 2.2, cargo: 'wrecked vehicle', label: 'Vehicle recovery', pay: 3, box: [0.95, 0.65, 1.95], draft: 0.8 },
+  cabin: { hang: 3.4, mass: 2.4, radius: 2.6, cargo: 'prefab cabin', label: 'Prefab cabin', pay: 3.5, box: [1.45, 1.28, 2.1] },
   cap: 1, fillRate: 0.8, dumpRate: 1.3, waterMass: 0.45,   // fill/dump rates are per unit of capacity
   heliMass: 1,                                                // airframe mass: lighter ones get yanked more
   anchor: 0.6,                                                // rope attach height above the chopper's ground contact
@@ -39,11 +41,11 @@ export const splashReach = (cap = RIG.cap) => Math.max(2, Math.round(1 + 0.75 * 
 
 // Anything the hook can carry: a crate or a person. pos is the top (hook point); spec gives size and mass.
 export function createCrate(x, y, z, spec = RIG.crate) {
-  return { pos: new THREE.Vector3(x, y + spec.hang, z), vel: new THREE.Vector3(), up: new THREE.Vector3(0, 1, 0), held: false, hit: 0, spec };
+  return { pos: new THREE.Vector3(x, y + spec.hang, z), vel: new THREE.Vector3(), up: new THREE.Vector3(0, 1, 0), quat: new THREE.Quaternion(), held: false, hit: 0, spec };
 }
 
 export const hangOf = (r) => (r.crate ? r.crate.spec.hang : RIG[r.tool].hang);
-const radiusOf = (r) => (r.crate ? r.crate.spec.radius : RIG[r.tool].radius);
+export const radiusOf = (r) => (r.crate ? r.crate.spec.radius : RIG[r.tool].radius);
 export const massOf = (r) => (r.crate ? r.crate.spec.mass : RIG[r.tool].mass + r.water * RIG.waterMass);
 
 // Rope-end physics: gravity + air drag toward the wind, ground/water floor, then an inextensible rope.
@@ -70,15 +72,13 @@ export function stepRig(r, s, dt, env) {
   v.y += (-G - v.y * RIG.airDrag) * dt;
   if (r.taut) v.addScaledVector(v.clone().sub(s.vel), -RIG.swingDamp * dt);
 
-  // The sea, or the base dip tank once it's built (env.pond: { x, z, r, y } surface).
-  const inPond = env.pond && Math.hypot(r.pos.x - env.pond.x, r.pos.z - env.pond.z) < env.pond.r - 0.8, surface = inPond ? env.pond.y : SEA;
-  const overSea = inPond || env.heightAt(r.pos.x, r.pos.z) < SEA - 0.5;
+  const surf = surfaceUnder(r.pos, env), overSea = surf !== null, surface = surf ?? SEA;
   r.dipped = overSea && r.pos.y - hang < surface;
   if (r.dipped) v.multiplyScalar(Math.exp(-3 * dt));
   r.pos.addScaledVector(v, dt);
 
-  // The bucket can sink 1 m under the surface to scoop; everything else rests on land or floats.
-  const floor = (overSea && !r.crate && r.tool === 'bucket' ? surface - 1 : env.groundAt(r.pos.x, r.pos.z)) + hang;
+  // The bucket and snorkel can sink 1.2 m under the surface to scoop/siphon; everything else rests on land or floats.
+  const floor = (overSea && !r.crate && (r.tool === 'bucket' || r.tool === 'snorkel') ? surface - 1.2 : env.groundAt(r.pos.x, r.pos.z)) + hang;
   if (r.pos.y < floor) {
     r.pos.y = floor;
     if (v.y < 0) v.y = 0;
@@ -114,6 +114,19 @@ export function stepRig(r, s, dt, env) {
       s.vel.z += dz * vrel * share;
     }
   }
+  settleRig(r, s, dt, dx, dy, dz);
+  if (r.crate) { r.crate.pos.copy(r.pos); r.crate.vel.copy(v); r.crate.up.copy(r.up); r.crate.quat.setFromUnitVectors(Y, r.up); }
+}
+
+// Water surface under p: the sea, or the base dip tank once it's built (env.pond: { x, z, r, y }); null over land.
+export function surfaceUnder(p, env) {
+  if (env.pond && Math.hypot(p.x - env.pond.x, p.z - env.pond.z) < env.pond.r - 0.8) return env.pond.y;
+  return env.heightAt(p.x, p.z) < SEA - 0.5 ? SEA + (env.waveAt ? env.waveAt(p.x, p.z) : 0) : null; // the sea, at the height of the swell there
+}
+
+// After the rope end has moved (here, or in physics.js): a taut rope rocks the helicopter, and the bucket's water
+// sloshes, spills, fills and dumps. (dx, dy, dz): unit vector from the rope anchor to the rope end.
+export function settleRig(r, s, dt, dx, dy, dz) {
   if (r.taut) {
     r.up.set(-dx, -dy, -dz);
     // A swinging taut load rocks the helicopter's attitude in pitch and roll proportional to its mass share.
@@ -156,11 +169,9 @@ export function stepRig(r, s, dt, env) {
       if (r.water <= 0) r.dumping = false;
     } else if (r.dipped) r.water = Math.min(RIG.cap, r.water + RIG.fillRate * RIG.cap * dt);
   }
-
-  if (r.crate) { r.crate.pos.copy(r.pos); r.crate.vel.copy(v); r.crate.up.copy(r.up); }
 }
 
-// Free crates: fall, land (recording impact speed), settle upright.
+// Free crates without the physics engine (node checks, or before Rapier has loaded): fall, land (recording impact speed), settle upright.
 export function stepCrate(c, dt, env) {
   c.vel.y -= G * dt;
   c.pos.addScaledVector(c.vel, dt);
@@ -173,6 +184,7 @@ export function stepCrate(c, dt, env) {
     const f = Math.exp(-8 * dt); c.vel.x *= f; c.vel.z *= f;
   }
   c.up.lerp({ x: 0, y: 1, z: 0 }, 1 - Math.exp(-4 * dt)).normalize();
+  c.quat.setFromUnitVectors(Y, c.up);
 }
 
 // Action key. Returns what happened, for prompts and sound.
@@ -279,7 +291,7 @@ export function buildBucketMesh() {
 // Weighted crane overhaul ball + swivel yoke + sculpted J-hook with spring safety latch.
 // Origin at top shackle (0, 0, 0); bottom of hook saddle at y = -0.48.
 export function buildHookMesh() {
-  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.5 });
+  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.55 });
   const b = bodyBaker(), group = new THREE.Group();
 
   // Top clevis shackle & swivel pin.
@@ -308,34 +320,58 @@ export function buildHookMesh() {
   return group;
 }
 
-export function buildRigView(scene) {
-  const rope = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.038, 0.038, 1, 6).translate(0, 0.5, 0),
-    new THREE.MeshStandardMaterial({ color: DARK, flatShading: true, roughness: 0.7 }),
-  );
-  const bucket = buildBucketMesh(), { shell, water } = bucket.userData;
-  const hook = buildHookMesh();
+function buildSnorkelMesh() {
+  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.55 });
+  const b = bodyBaker(), g = new THREE.Group();
+  b.add(new THREE.CylinderGeometry(0.12, 0.14, 0.16, 8), DARK, 0, -0.08, 0);
+  b.add(new THREE.CylinderGeometry(0.22, 0.18, 0.28, 8), ORANGE, 0, -0.3, 0);
+  g.add(new THREE.Mesh(b.geometry(), mat));
+  return g;
+}
 
-  scene.add(rope, bucket, hook);
+export function buildRigView(scene) {
+  // The rope is a chain of segments (one instanced draw) so a slack line sags instead of staying ruler-straight.
+  const SEG = 8, rope = new THREE.InstancedMesh(
+    new THREE.CylinderGeometry(0.038, 0.038, 1, 6).translate(0, 0.5, 0),
+    new THREE.MeshStandardMaterial({ color: DARK, flatShading: true, roughness: 0.7 }), SEG,
+  );
+  rope.frustumCulled = false;
+  const pa = new THREE.Vector3(), pb = new THREE.Vector3(), rq = new THREE.Quaternion(), rs = new THREE.Vector3(1, 1, 1), rm = new THREE.Matrix4();
+  const bucket = buildBucketMesh(), { shell, water } = bucket.userData;
+  const hook = buildHookMesh(), snorkel = buildSnorkelMesh();
+
+  scene.add(rope, bucket, hook, snorkel);
   const p = new THREE.Vector3(), anchor = new THREE.Vector3(), dir = new THREE.Vector3();
   let plump = 0;
 
   // view: interpolated chopper position; shown false hides the whole rig (airframes with no line).
   // Returns the interpolated rope end.
-  return function update(r, view, alpha, shown = true) {
-    if (!shown) { rope.visible = bucket.visible = hook.visible = false; return p.copy(view); }
+  return function update(r, view, alpha, shown = true, yaw = 0) {
+    if (!shown) { rope.visible = bucket.visible = hook.visible = snorkel.visible = false; return p.copy(view); }
     p.lerpVectors(r.prev, r.pos, alpha);
-    anchor.set(view.x, view.y + RIG.anchor, view.z);
+    if (r.tool === 'snorkel') anchor.set(view.x + Math.cos(yaw) * 0.78 - Math.sin(yaw) * 0.34, view.y + 2.68, view.z - Math.sin(yaw) * 0.78 - Math.cos(yaw) * 0.34);
+    else anchor.set(view.x, view.y + RIG.anchor, view.z);
     dir.subVectors(p, anchor);
     const len = dir.length();
     rope.visible = len > 0.16;
-    rope.position.copy(anchor);
-    rope.scale.y = len;
-    if (len > 1e-4) rope.quaternion.setFromUnitVectors(Y, dir.divideScalar(len));
+    const thick = r.tool === 'snorkel' ? 2.6 : 1;
+    rs.x = rs.z = thick;
+    // Slack hangs in a curve: the middle drops by about what a line of that length would, but never far below both ends.
+    const sag = Math.min(0.45 * Math.sqrt(Math.max(0, r.len * r.len - len * len)), Math.max(0, (anchor.y + p.y) / 2 - Math.min(anchor.y, p.y) + 0.5));
+    pa.copy(anchor);
+    for (let i = 1; i <= SEG; i++) {
+      const u = i / SEG;
+      pb.lerpVectors(anchor, p, u).y -= sag * 4 * u * (1 - u);
+      rs.y = pa.distanceTo(pb);
+      rope.setMatrixAt(i - 1, rm.compose(pa, rq.setFromUnitVectors(Y, dir.subVectors(pb, pa).divideScalar(rs.y || 1)), rs));
+      pa.copy(pb);
+    }
+    rope.instanceMatrix.needsUpdate = true;
 
     bucket.visible = r.tool === 'bucket';
     hook.visible = r.tool === 'hook';
-    const g = bucket.visible ? bucket : hook;
+    snorkel.visible = r.tool === 'snorkel';
+    const g = bucket.visible ? bucket : snorkel.visible ? snorkel : hook;
     g.position.copy(p);
     g.quaternion.setFromUnitVectors(Y, r.up);
     if (bucket.visible) {
@@ -356,7 +392,7 @@ export function buildRigView(scene) {
 
 // Heavy cargo meshes; origin at the top centre (the hook point), baked into one mesh with 3D slings & spreader bars.
 export function buildHeavyMesh(key) {
-  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.6 });
+  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.55 });
   const b = bodyBaker(), g = new THREE.Group();
   // Top master lifting link & shackle at the hook point (0, 0, 0).
   b.add(new THREE.CylinderGeometry(0.055, 0.065, 0.09, 6), DARK, 0, -0.045, 0);
@@ -500,7 +536,7 @@ export function buildHeavyMesh(key) {
 // Wooden air-cargo supply crate on 3 forklift pallet skids with timber cross-bracing & 4-leg lifting sling.
 // Origin at top shackle (0, 0, 0); bottom of pallet skids at y = -1.60 (matches RIG.crate.hang).
 export function buildCrateMesh() {
-  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.65 });
+  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.55 });
   const b = bodyBaker(), g = new THREE.Group();
 
   // Top master shackle & 4-leg wire sling down to corner pad-eyes on the crate roof.
@@ -541,7 +577,7 @@ export function buildCrateMesh() {
 // Stranded hiker / boater in a hi-vis rescue jacket, helmet, backpack & hoist harness; origin at top hoist ring (0, 0, 0),
 // boots at y = -1.80 (matches RIG.person.hang). Passing boater = true adds an inflatable orange life raft.
 export function buildPersonMesh(boater = false) {
-  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.6 });
+  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.55 });
   const b = bodyBaker(), g = new THREE.Group();
 
   // Top hoist D-ring, swivel & dual yellow rescue hoist straps down to the chest harness.
@@ -586,5 +622,5 @@ export function buildPersonMesh(boater = false) {
 
 export function placeCrateMesh(mesh, c) {
   mesh.position.copy(c.pos);
-  mesh.quaternion.setFromUnitVectors(Y, c.up);
+  mesh.quaternion.copy(c.quat);
 }

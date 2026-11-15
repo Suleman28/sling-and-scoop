@@ -1,1 +1,33 @@
 @AGENTS.md
+
+## Recent work: physics, sim flight, cutter, weather
+
+Decisions are in `PLAN.md` (Phase 7: physics engine, Phase 8: sim layer, Phase 9: cutter, weather, damage).
+
+- **Physics engine (Rapier):** `@dimforge/rapier3d-compat`, `src/physics.js`, lazy-loaded (WASM chunk ~1.6 MB gzipped). Until it is ready, and in node checks, the classic hand-rolled code runs. A step costs ~0.4 ms.
+  - Colliders: terrain triangles, a sea floor, cones for trees, cylinders for towers, boxes for buildings (`SOLIDS` in `world.js`).
+  - Hookable loads are rigid boxes (`RIG[...].box`) that tumble, roll and stack. A load's `hit` is its per-step velocity change.
+  - Loose bodies float at their `draft` (in `RIG`), bob on the swell and splash. Rotor downwash (`WASH`) pushes drums and light cargo.
+  - Oil drums (instanced pyramids at the base apron and islet depot) explode on a hard knock (`DRUM.pop`) or burning ground, chain-react and ignite the fire sim. `physics.reset()` restacks them each shift.
+  - `physics.step` returns events (`boom`, `splash`); `main.js` owns the effects (`explodeFx`, `splashFx`, `dustFx`, sounds `boom`/`splosh`).
+- **Physics flight (default on; Settings switches it off):** `stepFlight` still turns the stick into a target velocity. The helicopter is a dynamic body (no gravity, rotation locked) that collides only with loose things; ground and trees stay hand-rolled. Buildings now push aircraft and loads out in `hitTrees`.
+  - The rope is a Rapier rope joint, drawn as 8 sagging instanced segments. The rotor carries the load up to `RIG.maxLift`; heavier loads pull the craft down.
+  - An impact over `CRASH` (20 m/s) wrecks the craft: it tumbles, explodes, burns, drops the load and is towed home after 5 s. The bomber stays kinematic until it wrecks.
+- **Sim layer in `stepFlight` (tuned in `TUNE`):** rotor spool-up, fuel weight, sprung skids, vortex ring state (`s.vrs`), autorotation with flare (`s.rotorE`), fire thermals (`s.buffet`, via `env.burning`), slope-following skids that slide on steep ground, engine power scaled by `env.power`.
+- **Damage:** hits over 6 m/s add to `s.damage`: lost power, smoke, 100% is a wreck. HUD shows HULL. Repaired when stopped at base (`COSTS.repair`); a wreck costs `COSTS.crash`.
+- **Rescue Cutter (`src/boat.js`, `AIRFRAMES.boat`, `boat: true`):** 21 m fire and rescue cutter, ~13.5k triangles (the one deliberate high-detail model). W/S throttle, A/D wheel, drag to train monitors and searchlight (`s.aim`), hold F to spray (`BOAT.monitors`, `BOAT.jet`), G horn. Pitches and rolls on `waveAt`. Home is the `HARBOUR` jetty (refuel, hangar). Jobs: sea rescues and shoreline fires (`d.sea()` in `missions.js`).
+- **Sea and harbour:** one swell, `waveAt(x, z, t)` scaled by `SEAS.h`, drives the water mesh (vertex-coloured whitecaps), floating bodies, the cutter and buoys. `buildSurf` (shoreline foam), `buildLights` (dusk lights), `buildHarbour` (timber jetty). The seabed matches deep water so the terrain edge is hidden.
+- **Weather (`stepWeather`/`drawWeather` in `main.js`, `makeRain` in `fx.js`):** a squall every ~5 min for ~1.5 min. `weather.storm` 0..1 drives wind and gusts, sea state (`SEAS.h` up to 3), fog, dimmer light, rain, lightning with delayed thunder. Lightning can start fires; on shift it becomes a "Lightning strike near …" call (`strike` in `missions.js`).
+- **Missions and UI:** volatile cargo ("Fuel drums", "Gas bottles"; `VOLATILE`, `d.blast`) pays more and explodes on a hard knock. Varied sea-rescue titles. Minimap (bottom right). Cockpit view on V. Shift grade S to D on the results screen.
+- **Ambient life (`life.js`):** dolphins, navigation buoys (harbour channel and hazard), fishing trawlers.
+- **Refactor:** `tools.js` exports `surfaceUnder`, `settleRig`, `radiusOf`; `world.js` exports `SEGS`, `CELL`, `HALF`, `H`, `treeGrid`.
+- **Tests:** `npm test` also runs `test/boat.check.js`. `test/flight.check.js` covers the sim-layer effects; `test/physics.check.js` covers a drop, a knock, a hover on the rope, crate lift, overload, floating, the drum chain reaction, impact detonation, reset and a ram-and-wreck.
+- **Freighter (`src/ship.js`, `test/ship.check.js`):** the 72 m *MV Kestrel* circles the island at 4 m/s (R 1,460 m). Her flat deck is ground to aircraft and loads via `env.groundAt` (`deckAt`): land on the moving helideck, ride along (`onDeck`), refuel. In Rapier it is a kinematic slab (`deck` passed to `physics.step`), so crates set down on it ride. Forecastle and house are live entries in `SOLIDS` (`live: true`, skipped by physics); to the cutter her hull is a shoal (`boatEnv`). Cargo calls can send loads to her helideck (`d.ship`, `j.to.deck`).
+- **Later additions:** "Trawler going down" three-casualty sea rescue (more likely in a squall); the jetty and lighthouse breakwater stop the cutter (`boatEnv`); objective beacon fades up close. "Injured sailor aboard MV Kestrel" pickup from her deck; rain slows fire spread (`stepFire(..., rain)`); burning cells glow (additive domes in `buildFireView`); damage threshold is hits over 8 m/s. Aircraft searchlight on L; the bucket and floating bodies meet the sea at the swell's height (`surfaceUnder` adds `env.waveAt`).
+- **Verified:** `npm test` passes; headless-browser screenshots of drum blasts, land and sea wrecks, slack rope, the cutter (jetty, wake, a sea rescue) and a slope landing.
+- **Still needs a play-test:** every new feel value (VRS onset, spool delay, skid bounce, thermals, damage threshold, crash threshold, cutter handling, heavy-load sluggishness, blast and downwash strength, weather and sounds).
+- **Phase 10 (see `PLAN.md`):** HD low-poly terrain (5 m cells, `flip(i, j)` diagonals shared with `heightAt` and the Rapier trimesh, snowcap above `snowLine`), the cutter's waterjet wake (`makeWake`) and soft foam (`makeRings`), soft camera-facing particles, and crash rework (severity, rotor torn off, ditching and sinking). Respawn no longer leaves the craft wrecked (`spawnCraft` clears wreck state).
+- **Low-poly is the identity:** a smooth shader-textured terrain was tried and rejected (generic look, half the frame rate). Keep facets.
+- **Headless checks:** scripts drive the cached Chrome for Testing over the DevTools protocol (`window.__game` exposes `s`, `orbit`, `press`, `heightAt`). They share the GPU with any open game tab, so frame-rate numbers taken while the owner is playing are unreliable.
+- **Not done:** no cockpit interior model; integrated-GPU frame-rate check of the 5 m terrain; multiplayer (a proposed shape is in `PLAN.md`).
+- **Token usage:** run `npm run tokens` before finishing a task or opening a PR; it updates the table in `README.md` and `tokens.json` (see `AGENTS.md`). Never edit those numbers by hand.

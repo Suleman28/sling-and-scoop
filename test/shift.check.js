@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { RIG } from '../src/tools.js';
 import { buildWorld, fuelAt, PAD, SITES } from '../src/world.js';
 import { createFire, stepFire } from '../src/fire.js';
-import { accept, comboMult, createDispatch, disposeDispatch, updateDispatch } from '../src/missions.js';
+import { abandon, accept, comboMult, createDispatch, cycleFocus, disposeDispatch, douseAt, updateDispatch } from '../src/missions.js';
 
 const scene = new THREE.Scene(), { houses } = buildWorld(scene);
 const idle = { pos: new THREE.Vector3(PAD.x, PAD.y, PAD.z), grounded: true };
@@ -46,6 +46,7 @@ console.log(`shift ok (ignored shift ends at ${a.t.toFixed(0)} s, ${a.stats.lost
   const d = createDispatch({ scene, fire: createFire(fuelAt, 9), houses, crates: [] }, 9);
   d.comboT = 10; d.combo = 2; d.calls.push({ id: 99, type: 'cargo', age: 0, title: 't' });
   d.job = { id: 98, type: 'cargo', age: 0, crate: { held: true, hit: 0, pos: { x: 1e4, z: 1e4 } }, to: { x: 0, z: 0 } };
+  d.jobs = [d.job];
   updateDispatch(d, 5, idle, () => {});
   assert.equal(d.comboT, 10, 'window paused while on a job');
 }
@@ -99,4 +100,41 @@ console.log('shift variety ok');
   for (const [p, r] of [[PADS[0], 45], [PADS[1], 14], ...SITES.map((s) => [s, 30])])
     for (let a = 0; a < 6.28; a += 0.1) for (let d = 0; d <= r; d += 2) assert.ok(heightAt(p.x + Math.cos(a) * d, p.z + Math.sin(a) * d) - p.y < 0.05, `ground over the pad at ${p.name || 'base'}`);
   console.log('pads level ok');
+}
+
+// Two jobs at once: a second call can be taken, a third can't; J moves the focus; finishing one leaves the other in focus.
+{
+  const d = createDispatch({ scene, fire: createFire(fuelAt, 9), houses, crates: [] }, 11);
+  for (let i = 0; i < 400 && d.calls.length < 3; i++) updateDispatch(d, 1, idle, () => {});
+  assert.ok(d.calls.length >= 3, 'three calls on the board');
+  const a = accept(d, 0), b = accept(d, 0);
+  assert.ok(a && b && d.jobs.length === 2 && d.job === b, 'two jobs, the newest in focus');
+  assert.equal(accept(d, 0), null, 'no third job');
+  assert.equal(cycleFocus(d), a, 'J moves the focus');
+  abandon(d);
+  assert.ok(d.jobs.length === 1 && d.job === b, 'handing one back leaves the other in focus');
+  console.log('two jobs ok');
+}
+
+// The cutter's fires are boats burning at sea: the monitors' water puts them out (douseAt), whatever her pace.
+{
+  const d = createDispatch({ scene, fire: createFire(fuelAt, 5), houses, crates: [], sea: () => true, can: (t) => t === 'fire' || t === 'rescue' }, 5);
+  for (let i = 0; i < 600 && !d.calls.some((c) => c.vessel); i++) updateDispatch(d, 1, idle, () => {});
+  const v = d.calls.find((c) => c.vessel);
+  assert.ok(v && v.heat === 1, 'a vessel fire is posted');
+  accept(d, d.calls.indexOf(v));
+  for (let i = 0; i < 400 && v.heat > 0; i++) douseAt(d, v.x + 5, v.z, 0.01);
+  updateDispatch(d, 0.1, idle, () => {});
+  assert.ok(!d.jobs.includes(v) && d.stats.done.fire === 1, 'doused: fire out, job done');
+  disposeDispatch(d);
+  console.log('vessel fire ok');
+}
+// Ranks gate the harder calls; a minor casualty can go to the nearest clinic or on to the hospital.
+{
+  const titles = (rank) => { const d = createDispatch({ scene, fire: createFire(fuelAt, 3), houses, crates: [], rank }, 3), seen = []; for (let i = 0; i < 1500; i++) { d.spawnT = 0; d.chaos = 0; updateDispatch(d, 0.5, idle, () => {}); for (const c of d.calls.splice(0)) seen.push(c); } disposeDispatch(d); return seen; };
+  const novice = titles(0);
+  assert.ok(!novice.some((c) => /Major|Large|House fire|Car (fire|crash)/.test(c.title) || c.heavy || c.volatile), 'a Trainee gets no big fires, heavy or volatile cargo, house or car calls');
+  const minor = titles(9).find((c) => c.alt);
+  assert.ok(minor && !minor.dest.hospital && minor.alt.hospital && minor.cond > 0.99, 'minor case: clinic first, hospital as the bonus option');
+  console.log('ranks and clinics ok');
 }

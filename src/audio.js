@@ -134,16 +134,16 @@ export function updateAudio(lift, speed, kind = 'utility', state = {}) {
   if (!ctx) return;
   const plane = kind === true || kind === 'bomber';
   const t = ctx.currentTime, thr = (lift + 1) / 2;
-  const isScout = kind === 'scout', isHeavy = kind === 'heavy';
+  const boat = kind === 'boat', isScout = kind === 'scout', isHeavy = kind === 'heavy'; // the cutter: no rotor, the piston voice dropped to a marine diesel
   const idle = !plane && state.grounded && lift <= 0 ? 0.55 : 1;
   const slap = 1 + Math.min(0.35, (state.turn || 0) * 0.6);
-  chop.gain.setTargetAtTime(plane ? 0 : (isHeavy ? 0.42 : isScout ? 0.28 : 0.34) * idle * slap, t, 0.2);
-  lfoDepth.gain.setTargetAtTime(plane ? 0 : (isHeavy ? 0.32 : isScout ? 0.22 : 0.26) * idle * slap, t, 0.2);
+  chop.gain.setTargetAtTime(plane || boat ? 0 : (isHeavy ? 0.42 : isScout ? 0.28 : 0.34) * idle * slap, t, 0.2);
+  lfoDepth.gain.setTargetAtTime(plane || boat ? 0 : (isHeavy ? 0.32 : isScout ? 0.22 : 0.26) * idle * slap, t, 0.2);
   whineGain.gain.setTargetAtTime(plane || isScout ? 0 : (isHeavy ? 0.006 : 0.004) * Math.max(0, lift), t, 0.3); // turbine only sings when you pull power
-  pistonGain.gain.setTargetAtTime(plane ? 0 : (isScout ? 0.048 + 0.028 * Math.max(0, lift) : isHeavy ? 0.028 : 0.01) * idle, t, 0.2);
+  pistonGain.gain.setTargetAtTime(plane ? 0 : boat ? 0.07 + 0.06 * lift : (isScout ? 0.048 + 0.028 * Math.max(0, lift) : isHeavy ? 0.028 : 0.01) * idle, t, 0.2);
   if (!plane) {
-    piston.frequency.setTargetAtTime(((isScout ? 88 : isHeavy ? 52 : 68) + lift * 16 + speed * 0.35) * (0.75 + 0.25 * idle), t, 0.25);
-    pistonLp.frequency.setTargetAtTime((isScout ? 230 : 140) + Math.max(0, lift) * 85, t, 0.25);
+    piston.frequency.setTargetAtTime(boat ? 30 + lift * 26 + speed * 0.6 : ((isScout ? 88 : isHeavy ? 52 : 68) + lift * 16 + speed * 0.35) * (0.75 + 0.25 * idle), t, boat ? 0.5 : 0.25);
+    pistonLp.frequency.setTargetAtTime(boat ? 110 + lift * 150 : (isScout ? 230 : 140) + Math.max(0, lift) * 85, t, 0.25);
   }
   // Layer warm synthesized twin-engine beat under the recorded prop loop so the bomber has deep stereo/phased chestiness.
   planeBus.gain.setTargetAtTime(plane ? (propLoop ? 0.055 + 0.065 * thr : 0.14 + 0.12 * thr) : 0, t, 0.2);
@@ -199,7 +199,34 @@ export function sfx(type) {
     g.gain.setValueAtTime(0.22, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
     src.connect(bp).connect(g).connect(master); src.start(t, Math.random()); src.stop(t + 0.5);
   } else if (type === 'accept') { tone(587, 587, 0.07, 'sine', 0.1); tone(880, 880, 0.12, 'sine', 0.12, 0.08); }
-  else if (type === 'done') { tone(523, 523, 0.09, 'triangle', 0.14); tone(659, 659, 0.09, 'triangle', 0.14, 0.08); tone(784, 1046, 0.22, 'triangle', 0.16, 0.16); }
+  else if (type === 'horn') { // ship's horn: two reeds a fourth apart, held, through a low-pass
+    const lp = ctx.createBiquadFilter(), g = ctx.createGain();
+    lp.type = 'lowpass'; lp.frequency.value = 520;
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.3, t + 0.08); g.gain.setValueAtTime(0.3, t + 1.1); g.gain.exponentialRampToValueAtTime(0.001, t + 1.5);
+    for (const f of [146, 195]) { const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f; o.connect(lp); o.start(t); o.stop(t + 1.55); }
+    lp.connect(g).connect(master);
+  } else if (type === 'done') { tone(523, 523, 0.09, 'triangle', 0.14); tone(659, 659, 0.09, 'triangle', 0.14, 0.08); tone(784, 1046, 0.22, 'triangle', 0.16, 0.16); }
+  else if (type === 'anchorDrop' || type === 'anchorWeigh') { // metallic chain links + splash on drop
+    const clink = (delay, f, vol) => {
+      const s = ctx.createBufferSource(), bp = ctx.createBiquadFilter(), g = ctx.createGain();
+      s.buffer = noise; bp.type = 'bandpass'; bp.Q.value = 5.5; bp.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t + delay); g.gain.linearRampToValueAtTime(vol, t + delay + 0.006); g.gain.exponentialRampToValueAtTime(0.001, t + delay + 0.045);
+      s.connect(bp).connect(g).connect(master); s.start(t + delay, Math.random()); s.stop(t + delay + 0.05);
+    };
+    if (type === 'anchorDrop') {
+      const splash = ctx.createBufferSource(), bp = ctx.createBiquadFilter(), sg = ctx.createGain();
+      splash.buffer = noise; bp.type = 'bandpass'; bp.Q.value = 0.7;
+      bp.frequency.setValueAtTime(900, t + 0.04); bp.frequency.exponentialRampToValueAtTime(240, t + 0.48);
+      sg.gain.setValueAtTime(0.0001, t + 0.04); sg.gain.linearRampToValueAtTime(0.22, t + 0.09); sg.gain.exponentialRampToValueAtTime(0.001, t + 0.50);
+      splash.connect(bp).connect(sg).connect(master); splash.start(t + 0.04, Math.random()); splash.stop(t + 0.54);
+    } else {
+      const o = ctx.createOscillator(), og = ctx.createGain();
+      o.type = 'sine'; o.frequency.setValueAtTime(110, t); o.frequency.exponentialRampToValueAtTime(185, t + 0.32);
+      og.gain.setValueAtTime(0.0001, t); og.gain.linearRampToValueAtTime(0.055, t + 0.04); og.gain.exponentialRampToValueAtTime(0.001, t + 0.34);
+      o.connect(og).connect(master); o.start(t); o.stop(t + 0.36);
+      for (let i = 0; i < 6; i++) clink(0.03 + i * 0.055, 900 + ((i * 211) % 380), 0.07);
+    }
+  }
 }
 
 // Impact thump, strength 0..1.
@@ -225,4 +252,28 @@ export function toggleMute() {
 export function setVolume(v) {
   level = v;
   if (master && !muted) master.gain.setTargetAtTime(0.5 * level, ctx.currentTime, 0.05);
+}
+
+// Explosion, loudness 0..1: a falling sub tone under a long low-passed rumble.
+export function boom(v) {
+  if (!ctx) return;
+  const t = ctx.currentTime, o = ctx.createOscillator(), og = ctx.createGain(), src = ctx.createBufferSource(), lp = ctx.createBiquadFilter(), g = ctx.createGain();
+  o.type = 'triangle';
+  o.frequency.setValueAtTime(90, t); o.frequency.exponentialRampToValueAtTime(30, t + 0.6);
+  og.gain.setValueAtTime(v * 1.4, t); og.gain.exponentialRampToValueAtTime(0.001, t + 0.7);
+  o.connect(og).connect(master); o.start(t); o.stop(t + 0.75);
+  src.buffer = noise;
+  lp.type = 'lowpass'; lp.frequency.setValueAtTime(600, t); lp.frequency.exponentialRampToValueAtTime(80, t + 1);
+  g.gain.setValueAtTime(0.001, t); g.gain.linearRampToValueAtTime(v * 1.6, t + 0.02); g.gain.exponentialRampToValueAtTime(0.001, t + 1.1);
+  src.connect(lp).connect(g).connect(master); src.start(t, Math.random()); src.stop(t + 1.15);
+}
+
+// Heavy splash, loudness 0..1: band-passed noise sweeping down.
+export function splosh(v) {
+  if (!ctx) return;
+  const t = ctx.currentTime, src = ctx.createBufferSource(), bp = ctx.createBiquadFilter(), g = ctx.createGain();
+  src.buffer = noise;
+  bp.type = 'bandpass'; bp.Q.value = 0.8; bp.frequency.setValueAtTime(1800, t); bp.frequency.exponentialRampToValueAtTime(400, t + 0.35);
+  g.gain.setValueAtTime(v * 0.9, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+  src.connect(bp).connect(g).connect(master); src.start(t, Math.random()); src.stop(t + 0.4);
 }

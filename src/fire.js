@@ -69,6 +69,11 @@ export function fireStatus(f, owner) {
   return { n, x: n ? x / n : 0, z: n ? z / n : 0 };
 }
 
+// Ground crews put a fire out (one a spotter called in): every cell it owns stops burning.
+export function extinguish(f, owner) {
+  for (const c of [...f.burning]) if (f.owner[c] === owner) { f.heat[c] = 0; f.burning.delete(c); }
+}
+
 // Water landing at (x, z): full effect on its cell, falling off to 0.3 at the outer ring (reach rings out).
 // Returns true if it hit a burning cell (for steam).
 export function douse(f, x, z, amount, R = FIRE.reach) {
@@ -88,8 +93,8 @@ export function douse(f, x, z, amount, R = FIRE.reach) {
   return hit;
 }
 
-// wind: {x, z} in m/s. Cells that burn out with their fuel spent are pushed to f.scorched.
-export function stepFire(f, dt, wind) {
+// wind: {x, z} in m/s. rain (0..1) slows the spread. Cells that burn out with their fuel spent are pushed to f.scorched.
+export function stepFire(f, dt, wind, rain = 0) {
   for (f.acc += dt; f.acc >= FIRE.tick; f.acc -= FIRE.tick) {
     const t = FIRE.tick, ws = Math.hypot(wind.x, wind.z), wx = ws ? wind.x / ws : 0, wz = ws ? wind.z / ws : 0;
     for (let c = 0; c < N * N; c++) if (f.wet[c] > 0) f.wet[c] = Math.max(0, f.wet[c] - t);
@@ -103,7 +108,7 @@ export function stepFire(f, dt, wind) {
         if (f.fuel[c] < 0.1) f.scorched.push(c);
         continue;
       }
-      const i = c % N, j = Math.floor(c / N), spread = FIRE.spread * (f.rate.get(f.owner[c]) ?? 1);
+      const i = c % N, j = Math.floor(c / N), spread = FIRE.spread * (f.rate.get(f.owner[c]) ?? 1) * (1 - 0.7 * rain);
       for (const [di, dj, dx, dz] of NB) {
         const ni = i + di, nj = j + dj;
         if (ni < 0 || nj < 0 || ni >= N || nj >= N) continue;
@@ -124,14 +129,20 @@ export function buildFireView(scene, groundAt, smoke) {
   flames.frustumCulled = false;
   flames.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   scene.add(flames);
+  // The glow: one soft additive dome per burning cell, so a fire lights the dusk and shows through smoke and rain.
+  const GLOWS = 600, glow = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 1), new THREE.MeshBasicMaterial({ color: 0xff7a2a, transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }), GLOWS);
+  glow.frustumCulled = false;
+  glow.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  scene.add(glow);
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3(), col = new THREE.Color();
   const hash = (c, k) => { const h = Math.sin(c * 12.9898 + k * 78.233) * 43758.5453; return h - Math.floor(h); };
   let smokeAcc = 0;
 
   return function update(f, dt, t, wind) {
-    let n = 0;
+    let n = 0, g = 0;
     for (const c of f.burning) {
       const centre = cellCentre(c), heat = f.heat[c];
+      if (g < GLOWS) glow.setMatrixAt(g++, m.compose(p.set(centre.x, groundAt(centre.x, centre.z) + 2, centre.z), q, s.set(13 + 5 * heat, (7 + 9 * heat) * (0.92 + 0.08 * Math.sin(t * 7 + c)), 13 + 5 * heat)));
       for (let k = 0; k < 3 && n < MAX; k++) {
         const x = centre.x + (hash(c, k) - 0.5) * FIRE.cell * 0.8, z = centre.z + (hash(c, k + 7) - 0.5) * FIRE.cell * 0.8;
         const flick = 0.75 + 0.25 * Math.sin(t * (9 + k * 3) + c), h = (4 + 9 * heat) * flick * (0.7 + hash(c, k + 3) * 0.6);
@@ -140,8 +151,8 @@ export function buildFireView(scene, groundAt, smoke) {
         flames.setColorAt(n++, col.setHSL(0.015 + 0.08 * hash(c, k + 11) * flick, 1, 0.42 + 0.12 * flick));
       }
     }
-    flames.count = n;
-    flames.instanceMatrix.needsUpdate = true;
+    flames.count = n; glow.count = g;
+    flames.instanceMatrix.needsUpdate = glow.instanceMatrix.needsUpdate = true;
     if (flames.instanceColor) flames.instanceColor.needsUpdate = true;
 
     // Smoke: a capped number of puffs per second spread over the burning cells.
