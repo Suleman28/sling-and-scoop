@@ -75,12 +75,12 @@ How much AI compute has gone into this game so far, across Claude Code and Antig
 <!-- tokens:start -->
 | Model | Calls | Input | Cache write | Cache read | Output |
 |---|--:|--:|--:|--:|--:|
-| Gemini (Antigravity, all models) | 1,795 | 10,683,927 | 0 | 178,837,959 | 1,190,181 |
+| Gemini (Antigravity, all models) | 1,806 | 10,713,530 | 0 | 180,632,946 | 1,197,623 |
 | claude-opus-5-5 | 886 | 1,864 | 3,081,089 | 303,800,171 | 1,134,719 |
 | claude-sonnet-5-5 | 326 | 674 | 1,173,172 | 24,181,203 | 299,948 |
 | claude-fable-5-2 | 129 | 276 | 745,708 | 38,516,817 | 228,325 |
 | claude-haiku-5-5 | 6 | 12 | 87,341 | 233,539 | 5,202 |
-| **Total** | 3,142 | 10,686,753 | 5,087,310 | 545,569,689 | **2,858,375** |
+| **Total** | 3,153 | 10,716,356 | 5,087,310 | 547,364,676 | **2,865,817** |
 
 _Updated 2026-11-15 by `npm run tokens`. Cache read is the same context re-read each call, so it dominates; output is what the models wrote._
 <!-- tokens:end -->
