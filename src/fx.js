@@ -158,25 +158,26 @@ export function makeWake(scene, n = 110, T = 9) {
       const last = crumbs[0];
       if (!last || last.age > 0.4 || Math.hypot(live.x - last.x, live.z - last.z) > 2) crumbs.unshift({ ...live, k: 0.45 + Math.random() * 0.55, kl: 0.25 + 0.75 * Math.random() ** 1.5, kr: 0.25 + 0.75 * Math.random() ** 1.5 }); // k, kl, kr break the foam up (skewed dim, so the arms come out as patchy whitecaps)
     }
-    const list = (live ? [live, ...crumbs] : crumbs).slice(0, rows);
-    const drawCount = Math.max(0, list.length - 1) * 48;
+    const count = Math.min(rows, crumbs.length + (live ? 1 : 0));
+    const drawCount = Math.max(0, count - 1) * 48;
     mesh.visible = drawCount > 0;
     if (mesh.visible) {
       g.setDrawRange(0, drawCount);
-      list.forEach((c, i) => {
+      for (let i = 0; i < count; i++) {
+        const c = live ? (i === 0 ? live : crumbs[i - 1]) : crumbs[i];
         const f = Math.max(0, 1 - c.age / T), o = i * ROW, wy = waveAt(c.x, c.z) + lift;
-        const put = (j, x, z, alpha) => { pos[(o + j) * 3] = x; pos[(o + j) * 3 + 1] = wy; pos[(o + j) * 3 + 2] = z; col[(o + j) * 4 + 3] = alpha; };
-        const across = (j, x, z, offs, alphas) => offs.forEach((d, q) => put(j + q, x + c.rx * d, z + c.rz * d, alphas[q]));
+        const put = (j, d, cx, cz, alpha) => { const v = o + j; pos[v * 3] = cx + c.rx * d; pos[v * 3 + 1] = wy; pos[v * 3 + 2] = cz + c.rz * d; col[v * 4 + 3] = alpha; };
         const a = Math.min(0.95, (Math.min(0.85, c.v / 9 + c.churn * 0.3) * (1 + 0.5 * Math.exp(-c.age * 1.5)))) * f ** 1.6 * (0.55 + 0.45 * c.k);
         const js = c.sep + c.age * 0.35, hw = (js + 1 + c.age * 0.6) * (0.85 + 0.15 * c.k), mid = a * (0.3 + 0.7 * Math.min(1, c.age / 1.8)); // twin streams merging
-        across(0, c.x, c.z, [-hw, -js, 0, js, hw], [0, a, mid, a, 0]);
+        put(0, -hw, c.x, c.z, 0); put(1, -js, c.x, c.z, a); put(2, 0, c.x, c.z, mid); put(3, js, c.x, c.z, a); put(4, hw, c.x, c.z, 0);
         // Bow wave, then Kelvin arm: wide solid white hugging the hull for her first second, then thin, patchy whitecaps that fade.
         const bow = Math.exp(-c.age * 2.5), fa = Math.max(0, 1 - c.age / 5), sp = Math.min(1, c.v / 8), spread = 0.4 + c.age * c.v * 0.34, aw = 0.5 + c.age * 0.5 + bow * 0.9;
-        for (const side of [-1, 1]) {
+        for (let s = 0; s < 2; s++) {
+          const side = s === 0 ? -1 : 1, j0 = s === 0 ? 5 : 8, bx = c.bx + c.rx * side * spread, bz = c.bz + c.rz * side * spread;
           const arm = sp * fa * fa * Math.min(0.9, 0.55 * (side < 0 ? c.kl : c.kr) + 0.6 * bow);
-          across(side < 0 ? 5 : 8, c.bx + c.rx * side * spread, c.bz + c.rz * side * spread, [-aw, 0, aw], [0, arm, 0]);
+          put(j0, -aw, bx, bz, 0); put(j0 + 1, 0, bx, bz, arm); put(j0 + 2, aw, bx, bz, 0);
         }
-      });
+      }
       g.attributes.position.needsUpdate = g.attributes.color.needsUpdate = true;
     }
 
@@ -184,7 +185,8 @@ export function makeWake(scene, n = 110, T = 9) {
     if (!plume.visible) return;
     const v = Math.abs(boat.speed), rev = boat.throttle < 0, cy = Math.cos(boat.yaw), sy = Math.sin(boat.yaw), th = -boat.steer * 0.42;
     const H = rev ? thr * 0.5 : thr * (0.3 + 0.55 * Math.min(1, v / 14)), L = rev ? 1.2 + thr * 2.2 : 1.5 + thr * (2.5 + v * 0.3);
-    [-1, 1].forEach((sx, k) => {
+    for (let k = 0; k < 2; k++) {
+      const sx = k === 0 ? -1 : 1;
       let dx = Math.sin(th), dz = Math.cos(th); // aft along the nozzle, in her frame
       if (rev) { dx = sx * 0.8; dz = -0.6; }    // buckets down: thrown forward and out under the quarters
       const ox = sx * boat.jets[0], oz = boat.jets[1];
@@ -198,7 +200,7 @@ export function makeWake(scene, n = 110, T = 9) {
         ppos[vi * 3] = x; ppos[vi * 3 + 1] = waveAt(x, z) + lift + h; ppos[vi * 3 + 2] = z;
         pcol[vi * 4 + 3] = Math.min(0.95, 0.45 + thr * 0.6) * (1 - u) ** 0.8 * (1 - Math.abs(w) ** 3);
       }
-    });
+    }
     pg.attributes.position.needsUpdate = pg.attributes.color.needsUpdate = true;
     pg.computeVertexNormals();
   }

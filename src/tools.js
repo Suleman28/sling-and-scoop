@@ -3,6 +3,17 @@ import { SEA } from './world.js';
 import { bodyBaker, DARK, GLASS, strut } from './chopper.js';
 
 const G = 9.81;
+const Y = new THREE.Vector3(0, 1, 0), V = THREE.Vector2, tv = new THREE.Vector3();
+
+// Local rope/pipe attachment point (metres in airframe frame): the snorkel hangs from the starboard pump housing.
+export const anchorLocal = (r) => (r?.tool === 'snorkel' ? { x: 0.78, y: 2.68, z: -0.34 } : { x: 0, y: RIG.anchor, z: 0 });
+export function anchorWorld(r, pos, yaw = 0, out = new THREE.Vector3()) {
+  if (r?.tool === 'snorkel') {
+    const c = Math.cos(yaw), s = Math.sin(yaw);
+    return out.set(pos.x + c * 0.78 - s * 0.34, pos.y + 2.68, pos.z - s * 0.78 - c * 0.34);
+  }
+  return out.set(pos.x, pos.y + RIG.anchor, pos.z);
+}
 
 // One line under the chopper; its end carries the bucket or the hook (and maybe a crate).
 export const RIG = {
@@ -27,7 +38,7 @@ export const RIG = {
 
 export function createRig(x, y, z) {
   return {
-    tool: 'bucket', len: RIG.bucket.line, savedLen: RIG.bucket.line, dLen: 0, pos: new THREE.Vector3(x, y, z), vel: new THREE.Vector3(), prev: new THREE.Vector3(x, y, z), up: new THREE.Vector3(0, 1, 0),
+    tool: 'bucket', stowed: false, len: RIG.bucket.line, savedLen: RIG.bucket.line, dLen: 0, pos: new THREE.Vector3(x, y, z), vel: new THREE.Vector3(), prev: new THREE.Vector3(x, y, z), up: new THREE.Vector3(0, 1, 0),
     acc: { x: 0, z: 0, vx: 0, vz: 0 }, slosh: { x: 0, z: 0, vx: 0, vz: 0, qx: 0, qz: 0 }, water: 0, dumping: false, dipped: false, taut: false, poured: 0, spilled: 0, crate: null,
   };
 }
@@ -57,7 +68,7 @@ export function stepRig(r, s, dt, env) {
   r.prev.copy(r.pos);
   if (r.dLen > 0) r.pos.addScaledVector(r.up, -r.dLen);
   r.dLen = 0;
-  const ax = s.pos.x, ay = s.pos.y + RIG.anchor, az = s.pos.z;
+  const a = anchorWorld(r, s.pos, s.yaw || 0, tv), ax = a.x, ay = a.y, az = a.z;
   if (r.tool === 'hook' && !r.crate && L <= 0.15) {
     // Fully retracted hook: stowed snugly against the belly winch housing with no swing.
     r.pos.set(ax, ay - L, az);
@@ -70,7 +81,7 @@ export function stepRig(r, s, dt, env) {
   v.x += (w.x - v.x) * RIG.airDrag * dt;
   v.z += (w.z - v.z) * RIG.airDrag * dt;
   v.y += (-G - v.y * RIG.airDrag) * dt;
-  if (r.taut) v.addScaledVector(v.clone().sub(s.vel), -RIG.swingDamp * dt);
+  if (r.taut) v.addScaledVector(tv.copy(v).sub(s.vel), -RIG.swingDamp * dt);
 
   const surf = surfaceUnder(r.pos, env), overSea = surf !== null, surface = surf ?? SEA;
   r.dipped = overSea && r.pos.y - hang < surface;
@@ -137,7 +148,7 @@ export function settleRig(r, s, dt, dx, dy, dz) {
       s.pitch += pullFwd * share * 0.55 * dt;
       s.roll -= pullRight * share * 0.75 * dt;
     }
-  } else r.up.lerp({ x: 0, y: 1, z: 0 }, 1 - Math.exp(-4 * dt)).normalize();
+  } else r.up.lerp(Y, 1 - Math.exp(-4 * dt)).normalize();
 
   // Chopper acceleration, smoothed (drives the slosh).
   const kA = 1 - Math.exp(-12 * dt);
@@ -183,7 +194,7 @@ export function stepCrate(c, dt, env) {
     c.vel.y = 0;
     const f = Math.exp(-8 * dt); c.vel.x *= f; c.vel.z *= f;
   }
-  c.up.lerp({ x: 0, y: 1, z: 0 }, 1 - Math.exp(-4 * dt)).normalize();
+  c.up.lerp(Y, 1 - Math.exp(-4 * dt)).normalize();
   c.quat.setFromUnitVectors(Y, c.up);
 }
 
@@ -232,7 +243,6 @@ export function swapTool(r) {
 
 // ---- Visuals ----
 
-const Y = new THREE.Vector3(0, 1, 0), V = THREE.Vector2;
 const ORANGE = 0xf2763a, BUCKET_RED = 0xe2502c, BUCKET_DARK = 0x8c2e1a, YELLOW = 0xf6d34a, STEEL = 0x4a4d57;
 
 // Collapsible Bambi Bucket on a 4-leg tubular bridle with control head, rim collar, vertical battens, hi-vis band, and dump valve base.
@@ -349,8 +359,7 @@ export function buildRigView(scene) {
   return function update(r, view, alpha, shown = true, yaw = 0) {
     if (!shown) { rope.visible = bucket.visible = hook.visible = snorkel.visible = false; return p.copy(view); }
     p.lerpVectors(r.prev, r.pos, alpha);
-    if (r.tool === 'snorkel') anchor.set(view.x + Math.cos(yaw) * 0.78 - Math.sin(yaw) * 0.34, view.y + 2.68, view.z - Math.sin(yaw) * 0.78 - Math.cos(yaw) * 0.34);
-    else anchor.set(view.x, view.y + RIG.anchor, view.z);
+    anchorWorld(r, view, yaw, anchor);
     dir.subVectors(p, anchor);
     const len = dir.length();
     rope.visible = len > 0.16;

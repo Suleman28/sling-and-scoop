@@ -75,12 +75,13 @@ export function loadCareer(storage) {
   try {
     const saved = JSON.parse(storage.getItem(KEY));
     if (saved) {
-      const c = newCareer(), owned = [...new Set(['scout', ...(saved.owned || [])])], old = saved.levels, shared = typeof old?.power === 'number';
+      const c = newCareer(), owned = [...new Set(['scout', ...(saved.owned || [])])].filter((k) => k in AIRFRAMES), old = saved.levels, shared = typeof old?.power === 'number';
       for (const f in c.levels) for (const k in c.levels[f]) {
         const v = shared ? (owned.includes(f) ? old[k] : 0) : old?.[f]?.[k];
         c.levels[f][k] = Math.min(MAX_LEVEL, Math.max(0, Math.floor(Number(v)) || 0));
       }
-      return { ...c, ...saved, levels: c.levels, owned, projects: (saved.projects || []).filter((k) => k in PROJECTS), gear: saved.gear || (owned.includes('utility') ? ['utility:bucket'] : []), xp: saved.xp ?? owned.reduce((t, f) => t + AIRFRAMES[f].cost * 2, 0) }; // saves from before gear keep the Utility's bucket; from before ranks, what they own counts as experience
+      const airframe = saved.airframe in AIRFRAMES && owned.includes(saved.airframe) ? saved.airframe : owned[0];
+      return { ...c, ...saved, airframe, levels: c.levels, owned, projects: (saved.projects || []).filter((k) => k in PROJECTS), gear: saved.gear || (owned.includes('utility') ? ['utility:bucket'] : []), xp: saved.xp ?? owned.reduce((t, f) => t + AIRFRAMES[f].cost * 2, 0) }; // saves from before gear keep the Utility's bucket; from before ranks, what they own counts as experience
     }
   } catch {}
   return newCareer();

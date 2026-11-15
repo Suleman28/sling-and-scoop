@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import R from '@dimforge/rapier3d-compat';
 import { CELL, flip, H, HALF, HARBOUR, OILRIG, PAD, PADS, padLocal, SEA, SEGS, SOLIDS, treeGrid } from './world.js';
 import { bodyBaker, DARK } from './chopper.js';
-import { hangOf, massOf, radiusOf, RIG, settleRig, surfaceUnder } from './tools.js';
+import { anchorLocal, hangOf, massOf, radiusOf, RIG, settleRig, surfaceUnder } from './tools.js';
 
 // Rapier runs the world around the flying: hookable loads and oil drums are rigid bodies that tumble, roll and stack.
 // With flight physics on (fly), the helicopter is a dynamic body too. stepFlight still turns the stick into a velocity;
@@ -135,6 +135,7 @@ export async function createPhysics(scene) {
     craft.setLinvel(wreck ? { x: s.vel.x, y: s.vel.y + 4, z: s.vel.z } : s.vel, true);
     craft.setAngvel(wreck ? { x: -s.vel.z * 0.15, y: 1.5, z: s.vel.x * 0.15 } : { x: 0, y: 0, z: 0 }, true);
     wreckFloat.draft = 0.6;
+    wreckFloat.wet = false;
     craftMode = mode; craftR = radius; craftBoat = isBoat;
   }
 
@@ -146,7 +147,7 @@ export async function createPhysics(scene) {
   const dropJoint = () => { if (joint) world.removeImpulseJoint(joint, true); joint = jointTo = null; jointKey = ''; };
 
   const bodies = new Map(); // load -> { body, mode: 'free' | 'held' (kinematic, classic rope) | 'rope' (on the joint) | 'off' }
-  const m = new THREE.Matrix4(), one = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3(), Y = new THREE.Vector3(0, 1, 0);
+  const m = new THREE.Matrix4(), one = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3(), Y = new THREE.Vector3(0, 1, 0), eu = new THREE.Euler(0, 0, 0, 'YXZ');
   const v0 = new THREE.Vector3(), tv0 = new THREE.Vector3(), anchor = new THREE.Vector3();
 
   function addLoad(c) {
@@ -216,6 +217,8 @@ export async function createPhysics(scene) {
 
   // Put the drum piles back (a new shift).
   function reset() {
+    dropJoint();
+    craftMode = '';
     for (const d of drums) {
       d.body.setEnabled(true);
       d.body.setTranslation(d.home, false);
@@ -255,16 +258,16 @@ export async function createPhysics(scene) {
     const mass = (isBoat ? 35 : plane ? 3 : RIG.heliMass) * KG, roped = fly && isHeli && r;
     if (s !== craftS) { craftS = s; craftMode = ''; } // towed home: a fresh aircraft
     const want = s.wreck ? 'wreck' : fly && isHeli ? 'fly' : 'kin';
-    if (want !== craftMode || radius !== craftR || isBoat !== craftBoat) setCraft(want, s, radius, mass, isBoat);
+    if (want !== craftMode || radius !== craftR || isBoat !== craftBoat || p.copy(craft.translation()).distanceTo(s.pos) > 8) setCraft(want, s, radius, mass, isBoat);
     else if (want === 'kin') {
       craft.setNextKinematicTranslation(s.pos);
-      craft.setNextKinematicRotation(q.setFromEuler(new THREE.Euler(-(s.pitch || 0), s.yaw || 0, s.roll || 0, 'YXZ')));
+      craft.setNextKinematicRotation(q.setFromEuler(eu.set(-(s.pitch || 0), s.yaw || 0, s.roll || 0)));
     }
     if (want === 'fly') {
       // stepFlight has already moved s.pos by s.vel: replay that move in Rapier, with the rotor carrying the load.
       const lift = r?.taut && massOf(r) <= RIG.maxLift ? (massOf(r) * KG * 9.81 * DT) / mass : 0;
       craft.setTranslation({ x: s.pos.x - s.vel.x * DT, y: s.pos.y - s.vel.y * DT, z: s.pos.z - s.vel.z * DT }, true);
-      craft.setRotation(q.setFromEuler(new THREE.Euler(-(s.pitch || 0), s.yaw || 0, s.roll || 0, 'YXZ')), true);
+      craft.setRotation(q.setFromEuler(eu.set(-(s.pitch || 0), s.yaw || 0, s.roll || 0)), true);
       craft.setLinvel(v0.set(s.vel.x, s.vel.y + lift, s.vel.z), true);
     }
 
@@ -312,11 +315,11 @@ export async function createPhysics(scene) {
         if (Math.abs(toolCol.mass() - massOf(r) * KG) > 1) toolCol.setMass(massOf(r) * KG);
         if (p.copy(tool.translation()).distanceTo(r.pos) > 0.5) { tool.setTranslation(r.pos, true); tool.setLinvel(r.vel, true); } // teleported: towed, refitted, swapped
       }
-      const key = `${r.len.toFixed(2)} ${RIG.anchor}`;
+      const aLoc = anchorLocal(r), key = `${r.len.toFixed(2)} ${aLoc.x} ${aLoc.y} ${aLoc.z}`;
       if (end !== jointTo) prevLen = r.len;
       if (end !== jointTo || key !== jointKey) {
         dropJoint();
-        joint = world.createImpulseJoint(R.JointData.rope(r.len, { x: 0, y: RIG.anchor, z: 0 }, { x: 0, y: 0, z: 0 }), craft, end, true);
+        joint = world.createImpulseJoint(R.JointData.rope(r.len, aLoc, { x: 0, y: 0, z: 0 }), craft, end, true);
         jointTo = end; jointKey = key;
       }
       // Air drag toward the wind, a damped swing relative to the craft, and water drag on a dipped load.
@@ -326,7 +329,7 @@ export async function createPhysics(scene) {
       if (r.dipped) v.multiplyScalar(Math.exp(-3 * DT));
       // When retracting the winch, pull the bucket/load up toward the anchor instead of letting the joint yank the chopper down.
       if (end === jointTo && prevLen > r.len && !r.overloaded) {
-        anchor.set(0, RIG.anchor, 0).applyQuaternion(craft.rotation()).add(craft.translation());
+        anchor.set(aLoc.x, aLoc.y, aLoc.z).applyQuaternion(craft.rotation()).add(craft.translation());
         const d = p.subVectors(end.translation(), anchor), dist = d.length() || 1e-6;
         if (dist > r.len) {
           const dl = Math.min(dist - r.len, prevLen - r.len);
@@ -493,7 +496,8 @@ export async function createPhysics(scene) {
       r.dipped = surf !== null && r.pos.y - hang < surf;
       r.hit = Math.hypot(v.x - tv0.x, v.y - tv0.y, v.z - tv0.z);
       r.vel.copy(v);
-      anchor.set(0, RIG.anchor, 0).applyQuaternion(craft.rotation()).add(craft.translation());
+      const aLoc = anchorLocal(r);
+      anchor.set(aLoc.x, aLoc.y, aLoc.z).applyQuaternion(craft.rotation()).add(craft.translation());
       const d = p.subVectors(r.pos, anchor), len = d.length() || 1e-6;
       d.divideScalar(len);
       r.taut = len >= r.len - 0.05;

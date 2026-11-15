@@ -39,7 +39,6 @@ const saveOpts = () => { try { storage.setItem(SETTINGS_KEY, JSON.stringify(opts
 const { sky, water, windsock, lighthouse, houses, surf, sun, hemi } = buildWorld(scene);
 const updateLife = buildLife(scene);
 setVolume(opts.volume);
-if (import.meta.env.DEV) career.bank = Math.max(career.bank, 1_000_000); // dev server only: test money for trying everything
 applyLoadout(career);
 const airframe = () => AIRFRAMES[career.airframe];
 const isPlane = () => !!airframe().plane, isBoat = () => !!airframe().boat;
@@ -181,11 +180,11 @@ function throwRotor(k) {
   thrown = { obj: rot, vel: new THREE.Vector3(s.vel.x * 0.6 + Math.cos(a) * out, 5 + 4 * k, s.vel.z * 0.6 + Math.sin(a) * out), spin: 14 + 10 * k, yaw: rot.rotation.y, tilt: 0.5 + Math.random() * 0.6 };
 }
 // Something heavy going into the water: a crown of spray and radial surface foam streaks.
-function splashFx(x, y, z, v, size) {
+function splashFx(x, y, z, v, size, sound = true) {
   const n = Math.min(30, 6 + v * 1.5);
   for (let i = 0; i < n; i++) { const a = Math.random() * Math.PI * 2, out = 1 + Math.random() * 3; wash.spawn(x + Math.cos(a) * size, y + 0.2, z + Math.sin(a) * size, Math.cos(a) * out, 2 + Math.random() * Math.min(9, v * 0.6), Math.sin(a) * out, SPRAY, { life: 0.9, grav: -7, drag: 0.6, grow: 0.9 + size * 0.5 }); }
   for (let i = 0; i < 6; i++) { const a = (i / 6) * Math.PI * 2 + rnd(0.3), sp = 3 + v * 0.25; rings.spawn(x + Math.cos(a) * size * 0.5, z + Math.sin(a) * size * 0.5, 0.35 * size, 1.8 * size, 0.75, Math.cos(a) * sp, Math.sin(a) * sp, SPRAY); }
-  splosh(Math.min(1, v / 14));
+  if (sound) splosh(Math.min(1, v / 14));
 }
 // A hard landing on dry ground kicks up a ring of dust.
 function dustFx(p, v) {
@@ -415,7 +414,7 @@ function press(code) {
       if (atDock()) { s.moored = !s.moored; s.anchored = false; if (!s.moored) s.castOffT = 3.0; sfx('swap'); say(s.moored ? 'Moored at dock' : 'Lines cast off'); }
       else {
         s.anchored = !s.anchored; s.moored = false; sfx(s.anchored ? 'anchorDrop' : 'anchorWeigh'); say(s.anchored ? 'Anchor dropped' : 'Anchor weighed');
-        if (s.anchored) { const fx = -Math.sin(s.yaw), fz = -Math.cos(s.yaw), rx = Math.cos(s.yaw), rz = -Math.sin(s.yaw); splashFx(s.pos.x + fx * 8.35 + rx * 1.90, SEA, s.pos.z + fz * 8.35 + rz * 1.90, 6, 0.9); }
+        if (s.anchored) { const fx = -Math.sin(s.yaw), fz = -Math.cos(s.yaw), rx = Math.cos(s.yaw), rz = -Math.sin(s.yaw); splashFx(s.pos.x + fx * 8.35 + rx * 1.90, SEA, s.pos.z + fz * 8.35 + rz * 1.90, 6, 0.9, false); }
       }
     } else pending.swap = true;
   }
@@ -470,7 +469,7 @@ let craftKind = kindNow();
 // the last knock) has to be cleared here too, or a towed wreck comes home still burning.
 const spawnCraft = () => Object.assign((craftKind = kindNow()) === 'plane' ? Object.assign(createPlane(RUNWAY.start.x, RUNWAY.y, RUNWAY.start.z, RUNWAY.yaw), { water: PLANE.tank })
   : craftKind === 'boat' ? createBoat(HARBOUR.x, HARBOUR.z, HARBOUR.yaw, true) // bow out to sea, moored until throttle/helm input
-  : createFlight(PAD.x, PAD.y, PAD.z, PAD.yaw), { wreck: false, wreckQ: null, damage: 0, hit: 0, crashV: 0, ditched: false, tankWater: 0, tankDumping: false, snorkel: false });
+  : createFlight(PAD.x, PAD.y, PAD.z, PAD.yaw), { wreck: false, wreckQ: null, damage: 0, hit: 0, crashV: 0, ditched: false, tankWater: 0, tankFill: 0, tankDumping: false, snorkel: false, snorkelOut: false, snorkelTarget: 0 });
 let s = spawnCraft();
 const prev = { pos: s.pos.clone(), yaw: s.yaw, pitch: s.pitch, roll: s.roll };
 const rigHome = padLocal(PAD, 4.5, 1); // beside the chopper, out of the camera's line
@@ -489,6 +488,7 @@ function towHome() {
   if (thrown) { scene.remove(thrown.obj, craft.group); thrown = null; craft = buildCraft(); scene.add(craft.group); } // a new rotor
   if (rig.crate) { rig.crate.held = false; rig.crate = null; }
   Object.assign(rig, createRig(rigHome.x, PAD.y + 1.2, rigHome.z), { tool: rig.tool });
+  fitTool();
   prev.pos.copy(s.pos);
 }
 const onPad = () => onDeck() || s.grounded && [...PADS, ...(career.projects.includes('stations') ? SITES.filter((p) => !p.hospital) : [])].some((p) => Math.hypot(s.pos.x - p.x, s.pos.z - p.z) < PAD_RADIUS);
@@ -842,7 +842,7 @@ renderer.setAnimationLoop((now) => {
       if (j) { sfx('accept'); say(`Accepted: ${j.title}${dispatch.jobs.length > 1 ? ' (J switches between your jobs)' : ''}`); }
       else if (dispatch.jobs.length >= MAX_JOBS && dispatch.calls[pending.accept]) say(`You have ${MAX_JOBS} jobs on: finish one, or X to hand one back`);
     }
-    if (pending.abandon && dispatch?.job) { if (rig.crate && dispatch.job.crate === rig.crate) act(rig, crates); abandon(dispatch); say('Job returned to the board'); }
+    if (pending.abandon && dispatch?.job) { if (rig.crate && (dispatch.job.crate === rig.crate || dispatch.job.person === rig.crate)) act(rig, crates); abandon(dispatch); say('Job returned to the board'); }
     pending.accept = -1;
     pending.abandon = false;
     pending.act = pending.swap = false;
@@ -1046,14 +1046,14 @@ renderer.setAnimationLoop((now) => {
   orbit.zoom += (orbit.targetZoom - orbit.zoom) * damp;
   // The plane's camera also follows its pitch (sits lower as the nose comes up) and trails a little looser.
   const planeCam = isPlane(), cy = camYaw + orbit.yaw, elev = Math.min(1.45, Math.max(-0.22, Math.atan2(height, dist) + orbit.pitch + (planeCam ? s.pitch * 0.6 : 0))), reach = Math.hypot(dist, height) * orbit.zoom;
-  camera.position.lerp({ x: view.x + Math.sin(cy) * Math.cos(elev) * reach, y: view.y + Math.sin(elev) * reach, z: view.z + Math.cos(cy) * Math.cos(elev) * reach }, planeCam ? 1 - Math.exp(-4 * dt) : k);
+  camera.position.lerp(eye.set(view.x + Math.sin(cy) * Math.cos(elev) * reach, view.y + Math.sin(elev) * reach, view.z + Math.cos(cy) * Math.cos(elev) * reach), planeCam ? 1 - Math.exp(-4 * dt) : k);
   camera.position.y = Math.max(camera.position.y, heightAt(camera.position.x, camera.position.z) + 2, SEA + 1.5);
   // Aim partway down the rope so chopper and load share the frame.
   // Frame by the rope's average drop, not the swinging load; look ahead less while orbiting with the mouse.
   ropeDrop += (end.y - view.y - 2 - ropeDrop) * (1 - Math.exp(-1.5 * dt));
   const ahead = (isBoat() ? 0.12 : 0.3) * Math.max(0, 1 - Math.abs(Math.atan2(Math.sin(orbit.yaw), Math.cos(orbit.yaw))) - Math.abs(orbit.pitch));
-  if (planeCam) look.lerp(new THREE.Vector3(0, 0, -12 * (ahead / 0.3)).applyQuaternion(craft.group.quaternion).add(view).setY(view.y + 3 - s.pitch * 12 * (ahead / 0.3)), 1 - Math.exp(-6 * dt)); // ahead along the nose
-  else look.lerp({ x: view.x + camVel.x * ahead, y: view.y + 2 + camVel.y * 0.15 + ropeDrop * 0.35 * loadFocus, z: view.z + camVel.z * ahead }, 1 - Math.exp(-6 * dt));
+  if (planeCam) look.lerp(eye.set(0, 0, -12 * (ahead / 0.3)).applyQuaternion(craft.group.quaternion).add(view).setY(view.y + 3 - s.pitch * 12 * (ahead / 0.3)), 1 - Math.exp(-6 * dt)); // ahead along the nose
+  else look.lerp(eye.set(view.x + camVel.x * ahead, view.y + 2 + camVel.y * 0.15 + ropeDrop * 0.35 * loadFocus, view.z + camVel.z * ahead), 1 - Math.exp(-6 * dt));
   camera.lookAt(look);
   if (mode === 'title' || (mode === 'hangar' && backTo === 'title')) { // menu backdrop: a slow orbit of the parked aircraft, framed right of the menu
     const o = t * 0.04 + s.yaw + 2.2;
@@ -1114,7 +1114,7 @@ renderer.setAnimationLoop((now) => {
     : rig.water > 0.05 && !rig.dumping ? 'F: dump water' : '';
 });
 
-window.__game = { s, orbit, rig, crates, renderer, camera, scene, wind, heightAt, fire, dispatch, startShift, press, weather, skip: (to) => { simT = to; } }; // skip: jump the sim clock (testing weather)
+window.__game = { s, career, orbit, rig, crates, renderer, camera, scene, wind, heightAt, fire, dispatch, startShift, press, weather, skip: (to) => { simT = to; } }; // skip: jump the sim clock (testing weather)
 
 function planePrompt() {
   if (!s.onSurface && s.lift < 1) return 'STALL! Nose down (W) and throttle up (Space)';
@@ -1130,7 +1130,7 @@ function boardHtml(goal) {
   if (mode === 'free') return `<div class="head">FREE ROAM <span>$${career.bank.toLocaleString()}</span></div><div class="dim">H: Hangar · Esc: Menu</div>`;
   if (!d) return `<div class="head">DISPATCH <span>$${career.bank.toLocaleString()}</span></div><div class="dim">Off shift</div>`;
   const km = (o) => (Math.hypot(o.x - s.pos.x, o.z - s.pos.z) / 1000).toFixed(1);
-  const late = (o) => (o.type === 'fire' ? (o.house ? ` · <span class="dim">house lost in ${Math.ceil(SHIFT.houseBurn - o.house.burnT)}s</span>` : '') : ` · <span class="dim">${Math.max(0, Math.ceil((o.type === 'rescue' ? SHIFT.rescueTimeout : SHIFT.cargoTimeout) - o.age))}s</span>`);
+  const late = (o) => (o.vessel ? ` · <span class="dim">${Math.max(0, Math.ceil(SHIFT.vesselBurn * (isBoat() ? 1.8 : 1) - o.age))}s</span>` : o.type === 'fire' ? (o.house ? ` · <span class="dim">house lost in ${Math.ceil(SHIFT.houseBurn - o.house.burnT)}s</span>` : '') : ` · <span class="dim">${Math.max(0, Math.ceil((o.type === 'rescue' ? SHIFT.rescueTimeout * (isBoat() ? 2.2 : 1) : SHIFT.cargoTimeout) - o.age))}s</span>`);
   const heavyTag = (o) => (o.heavy ? ` <b class="heavy">HEAVY</b>${RIG.maxLift < RIG[o.heavy].mass ? ' <span class="dim">(need more lift)</span>' : ''}` : '');
   const part = (o) => (o.story?.of > 1 ? `<div class="dim">${o.step > 1 ? '<b class="follow">FOLLOW-UP</b> · ' : ''}${o.story.name} · ${o.step}/${o.story.of}</div>` : '');
   const bonus = (o) => (o.after && o.after === d.lastId ? ` <b class="follow">+${Math.round((SHIFT.followBonus - 1) * 100)}%</b>` : '');

@@ -139,7 +139,7 @@ export function updateAudio(lift, speed, kind = 'utility', state = {}) {
   const slap = 1 + Math.min(0.35, (state.turn || 0) * 0.6);
   chop.gain.setTargetAtTime(plane || boat ? 0 : (isHeavy ? 0.42 : isScout ? 0.28 : 0.34) * idle * slap, t, 0.2);
   lfoDepth.gain.setTargetAtTime(plane || boat ? 0 : (isHeavy ? 0.32 : isScout ? 0.22 : 0.26) * idle * slap, t, 0.2);
-  whineGain.gain.setTargetAtTime(plane || isScout ? 0 : (isHeavy ? 0.006 : 0.004) * Math.max(0, lift), t, 0.3); // turbine only sings when you pull power
+  whineGain.gain.setTargetAtTime(plane || boat || isScout ? 0 : (isHeavy ? 0.006 : 0.004) * Math.max(0, lift), t, 0.3); // turbine only sings when you pull power
   pistonGain.gain.setTargetAtTime(plane ? 0 : boat ? 0.07 + 0.06 * lift : (isScout ? 0.048 + 0.028 * Math.max(0, lift) : isHeavy ? 0.028 : 0.01) * idle, t, 0.2);
   if (!plane) {
     piston.frequency.setTargetAtTime(boat ? 30 + lift * 26 + speed * 0.6 : ((isScout ? 88 : isHeavy ? 52 : 68) + lift * 16 + speed * 0.35) * (0.75 + 0.25 * idle), t, boat ? 0.5 : 0.25);
@@ -207,24 +207,23 @@ export function sfx(type) {
     lp.connect(g).connect(master);
   } else if (type === 'done') { tone(523, 523, 0.09, 'triangle', 0.14); tone(659, 659, 0.09, 'triangle', 0.14, 0.08); tone(784, 1046, 0.22, 'triangle', 0.16, 0.16); }
   else if (type === 'anchorDrop' || type === 'anchorWeigh') { // metallic chain links + splash on drop
-    const clink = (delay, f, vol) => {
+    const drop = type === 'anchorDrop', o = ctx.createOscillator(), og = ctx.createGain();
+    o.type = 'sine'; o.frequency.setValueAtTime(drop ? 185 : 110, t); o.frequency.exponentialRampToValueAtTime(drop ? 110 : 185, t + 0.32);
+    og.gain.setValueAtTime(0.0001, t); og.gain.linearRampToValueAtTime(0.055, t + 0.04); og.gain.exponentialRampToValueAtTime(0.001, t + 0.34);
+    o.connect(og).connect(master); o.start(t); o.stop(t + 0.36);
+    for (let i = 0; i < 6; i++) {
+      const delay = 0.03 + i * (drop ? 0.042 : 0.055), f = (drop ? 1180 : 900) + (drop ? -1 : 1) * ((i * 211) % 380);
       const s = ctx.createBufferSource(), bp = ctx.createBiquadFilter(), g = ctx.createGain();
       s.buffer = noise; bp.type = 'bandpass'; bp.Q.value = 5.5; bp.frequency.value = f;
-      g.gain.setValueAtTime(0.0001, t + delay); g.gain.linearRampToValueAtTime(vol, t + delay + 0.006); g.gain.exponentialRampToValueAtTime(0.001, t + delay + 0.045);
-      s.connect(bp).connect(g).connect(master); s.start(t + delay, Math.random()); s.stop(t + delay + 0.05);
-    };
-    if (type === 'anchorDrop') {
+      g.gain.setValueAtTime(0.0001, t + delay); g.gain.linearRampToValueAtTime(0.085, t + delay + 0.006); g.gain.exponentialRampToValueAtTime(0.001, t + delay + 0.048);
+      s.connect(bp).connect(g).connect(master); s.start(t + delay, Math.random()); s.stop(t + delay + 0.052);
+    }
+    if (drop) {
       const splash = ctx.createBufferSource(), bp = ctx.createBiquadFilter(), sg = ctx.createGain();
       splash.buffer = noise; bp.type = 'bandpass'; bp.Q.value = 0.7;
-      bp.frequency.setValueAtTime(900, t + 0.04); bp.frequency.exponentialRampToValueAtTime(240, t + 0.48);
-      sg.gain.setValueAtTime(0.0001, t + 0.04); sg.gain.linearRampToValueAtTime(0.22, t + 0.09); sg.gain.exponentialRampToValueAtTime(0.001, t + 0.50);
-      splash.connect(bp).connect(sg).connect(master); splash.start(t + 0.04, Math.random()); splash.stop(t + 0.54);
-    } else {
-      const o = ctx.createOscillator(), og = ctx.createGain();
-      o.type = 'sine'; o.frequency.setValueAtTime(110, t); o.frequency.exponentialRampToValueAtTime(185, t + 0.32);
-      og.gain.setValueAtTime(0.0001, t); og.gain.linearRampToValueAtTime(0.055, t + 0.04); og.gain.exponentialRampToValueAtTime(0.001, t + 0.34);
-      o.connect(og).connect(master); o.start(t); o.stop(t + 0.36);
-      for (let i = 0; i < 6; i++) clink(0.03 + i * 0.055, 900 + ((i * 211) % 380), 0.07);
+      bp.frequency.setValueAtTime(900, t + 0.26); bp.frequency.exponentialRampToValueAtTime(240, t + 0.64);
+      sg.gain.setValueAtTime(0.0001, t + 0.26); sg.gain.linearRampToValueAtTime(0.16, t + 0.31); sg.gain.exponentialRampToValueAtTime(0.001, t + 0.66);
+      splash.connect(bp).connect(sg).connect(master); splash.start(t + 0.26, Math.random()); splash.stop(t + 0.7);
     }
   }
 }

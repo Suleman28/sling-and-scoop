@@ -12,7 +12,7 @@ function clouds(scene, rng) {
   const b = bodyBaker(0.72);
   // Warm up the cloud vertex colors and sunset under-glow (tint lower puff vertices soft peach-gold 0xffdfc8 and upper vertices 0xfff6ee)
   for (const [x, y, z, r] of [[0, 0, 0, 1], [1.1, -0.2, 0.3, 0.75], [-1, -0.25, -0.2, 0.7], [0.3, 0.35, -0.4, 0.6]]) {
-    b.add(new THREE.IcosahedronGeometry(r, 2), (vx, vy) => (vy < 0 ? 0xffdfc8 : 0xfff6ee), x, y, z);
+    b.add(new THREE.IcosahedronGeometry(r, 1), (vx, vy) => (vy < 0 ? 0xffdfc8 : 0xfff6ee), x, y, z);
   }
   const n = 34, mesh = new THREE.InstancedMesh(b.geometry(), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, emissive: 0x6a4452 }), n);
   mesh.frustumCulled = false;
@@ -235,16 +235,16 @@ function harbourTrawler(scene, geo) {
   scene.add(mesh);
   const D = curve.getLength(), drive = D / 3.5, wait = 50, turn = 7, linger = 30, cycle = wait + turn + 2 * drive + linger;
   const yawOf = (a) => { const f = curve.getTangentAt(a); return Math.atan2(-f.x, -f.z); }; // nose along travel
-  const yaw0 = yawOf(0), turnBy = (a, b, k) => a + SMOOTH(Math.min(1, Math.max(0, k))) * Math.atan2(Math.sin(b - a), Math.cos(b - a));
+  const yaw0 = yawOf(0), turnBy = (a, da, k) => a + SMOOTH(Math.min(1, Math.max(0, k))) * da;
   const tWake = makeWake(scene, 45, 7);
   let prevT = 0, prevX = 0, prevZ = 0;
   return (t) => {
     const dt = Math.min(0.1, Math.max(0, t - prevT)); prevT = t;
     let c = t % cycle, a, yaw;
     if (c < wait) { a = 0; yaw = yaw0 + Math.PI; }                                        // moored, nose to shore
-    else if ((c -= wait) < turn) { a = 0; yaw = turnBy(yaw0 + Math.PI, yaw0, c / turn); } // swing round
+    else if ((c -= wait) < turn) { a = 0; yaw = turnBy(yaw0 + Math.PI, -Math.PI, c / turn); } // swing round
     else if ((c -= turn) < drive) { a = SMOOTH(c / drive); yaw = yawOf(a); }               // out, eased start and stop
-    else if ((c -= drive) < linger) { a = 1; yaw = turnBy(yawOf(1), yawOf(1) + Math.PI, c / turn); } // idle, turn about
+    else if ((c -= drive) < linger) { a = 1; yaw = turnBy(yawOf(1), Math.PI, c / turn); } // idle, turn about
     else { a = 1 - SMOOTH((c - linger) / drive); yaw = yawOf(a) + Math.PI; }                      // home, nose to shore on arrival
     const p0 = curve.getPointAt(a), fx = -Math.sin(yaw) * 4, fz = -Math.cos(yaw) * 4;
     e.set(Math.atan2(waveAt(p0.x + fx, p0.z + fz, t) - waveAt(p0.x - fx, p0.z - fz, t), 8), yaw, Math.sin(t * 0.8) * 0.04);
@@ -335,21 +335,23 @@ function mooredBoats(scene, trawlerGeometry) {
   scene.add(tMesh);
 
   const sb = bodyBaker(); sailboat(sb, false);
-  const sailGeo = sb.geometry();
   const slips = [[-25.5, -1.8, 0xc8452e], [-25.5, 3.7, 0x2b6e8c], [-25.5, 9.2, 0xe89a38]];
-  const sMeshes = slips.map(([lx, lz, col], i) => {
+  const sMesh = new THREE.InstancedMesh(sb.geometry(), mat, slips.length);
+  sMesh.frustumCulled = false;
+  scene.add(sMesh);
+  const sData = slips.map(([lx, lz, col], i) => {
+    sMesh.setColorAt(i, new THREE.Color(col));
     const [wx, wz] = toWorld(lx, lz);
-    const mesh = new THREE.Mesh(sailGeo, mat);
-    scene.add(mesh);
-    return { mesh, wx, wz, yaw: H.yaw - Math.PI / 2, phase: i * 1.7 };
+    return { wx, wz, yaw: H.yaw - Math.PI / 2, phase: i * 1.7 };
   });
   return (t) => {
     tMesh.position.set(tx, waveAt(tx, tz, t) - 0.1, tz);
     tMesh.rotation.set(Math.sin(t * 0.9) * 0.018, H.yaw, Math.cos(t * 0.7) * 0.022);
-    for (const o of sMeshes) {
-      o.mesh.position.set(o.wx, waveAt(o.wx, o.wz, t) - 0.08, o.wz);
-      o.mesh.rotation.set(Math.sin(t * 1.1 + o.phase) * 0.025, o.yaw, Math.cos(t * 0.95 + o.phase) * 0.032);
-    }
+    sData.forEach((o, i) => {
+      e.set(Math.sin(t * 1.1 + o.phase) * 0.025, o.yaw, Math.cos(t * 0.95 + o.phase) * 0.032);
+      sMesh.setMatrixAt(i, m.compose(p.set(o.wx, waveAt(o.wx, o.wz, t) - 0.08, o.wz), q.setFromEuler(e), sc.set(1, 1, 1)));
+    });
+    sMesh.instanceMatrix.needsUpdate = true;
   };
 }
 
@@ -374,7 +376,7 @@ function harbourShip(scene, variant = 'cargo', berthS = 1.2, sideSign = -1, scal
   const D = curve.getLength(), drive = D / 3.8, aTurn = Math.min(0.25, 50 / D), driveIn = (1 - aTurn) * drive, berthBack = aTurn * drive * 1.4;
   const wait = 42, linger = 28, turn = 12, cycle = wait + drive + linger + turn + driveIn + turn + berthBack;
   const yawOf = (a) => { const f = curve.getTangentAt(a); return Math.atan2(-f.x, -f.z); };
-  const yaw0 = yawOf(0), turnBy = (a, b, k) => a + SMOOTH(Math.min(1, Math.max(0, k))) * Math.atan2(Math.sin(b - a), Math.cos(b - a));
+  const yaw0 = yawOf(0), turnBy = (a, da, k) => a + SMOOTH(Math.min(1, Math.max(0, k))) * da;
   const track = {
     name, variant, scale, x: 0, y: 0, z: 0, yaw: yaw0, vx: 0, vz: 0, dYaw: 0,
     deckAt(wx, wz) {
@@ -399,18 +401,19 @@ function harbourShip(scene, variant = 'cargo', berthS = 1.2, sideSign = -1, scal
     if (t === lastT) return;
     const prevX = track.x, prevZ = track.z, prevYaw = track.yaw, dt = lastT < 0 ? 0 : t - lastT;
     lastT = t;
-    let c = (t + phase) % cycle, a, yaw;
+    let c = (t + phase) % cycle, a, yaw, backing = false;
     if (c < wait) { a = 0; yaw = yaw0; }
     else if ((c -= wait) < drive) { a = SMOOTH(c / drive); yaw = yawOf(a); }
     else if ((c -= drive) < linger) { a = 1; yaw = yawOf(1); }
-    else if ((c -= linger) < turn) { a = 1; yaw = turnBy(yawOf(1), yawOf(1) + Math.PI, c / turn); }
+    else if ((c -= linger) < turn) { a = 1; yaw = turnBy(yawOf(1), sideSign * Math.PI, c / turn); }
     else if ((c -= turn) < driveIn) { a = 1 - (1 - aTurn) * SMOOTH(c / driveIn); yaw = yawOf(a) + Math.PI; }
-    else if ((c -= driveIn) < turn) { a = aTurn; yaw = turnBy(yawOf(aTurn) + Math.PI, yawOf(aTurn), c / turn); }
-    else { a = aTurn * (1 - SMOOTH((c - turn) / berthBack)); yaw = yawOf(a); }
+    else if ((c -= driveIn) < turn) { a = aTurn; yaw = turnBy(yawOf(aTurn) + Math.PI, -sideSign * Math.PI, c / turn); }
+    else { a = aTurn * (1 - SMOOTH((c - turn) / berthBack)); yaw = yawOf(a); backing = true; }
     const p0 = curve.getPointAt(a), fx = -Math.sin(yaw) * 12, fz = -Math.cos(yaw) * 12, wy = waveAt(p0.x, p0.z, t) * 0.35;
     e.set(Math.atan2(waveAt(p0.x + fx, p0.z + fz, t) - waveAt(p0.x - fx, p0.z - fz, t), 24) * 0.4, yaw, Math.sin(t * 0.5 + phase) * 0.015);
     group.position.set(p0.x, wy, p0.z);
     group.quaternion.setFromEuler(e);
+    if (group.children[1]) group.children[1].rotation.y = t * 2.2;
     let dy = yaw - prevYaw;
     while (dy > Math.PI) dy -= 2 * Math.PI;
     while (dy < -Math.PI) dy += 2 * Math.PI;
@@ -419,7 +422,7 @@ function harbourShip(scene, variant = 'cargo', berthS = 1.2, sideSign = -1, scal
     track.vx = dt > 0 ? (p0.x - prevX) / dt : 0;
     track.vz = dt > 0 ? (p0.z - prevZ) / dt : 0;
     const spd = Math.hypot(track.vx, track.vz);
-    if (dt > 0) shipWake.update(Math.min(0.1, dt), (wx, wz) => waveAt(wx, wz, t), 0.14, spd > 0.25 ? { x: track.x, z: track.z, yaw: track.yaw, speed: spd, throttle: 0.4, steer: 0, stern: 32 * scale, bow: 40 * scale, beam: 15 * scale, jets: [1.5 * scale, 32 * scale] } : null);
+    if (dt > 0) shipWake.update(Math.min(0.1, dt), (wx, wz) => waveAt(wx, wz, t), 0.14, spd > 0.25 && !backing ? { x: track.x, z: track.z, yaw: track.yaw, speed: spd, throttle: 0.4, steer: 0, stern: 32 * scale, bow: 40 * scale, beam: 15 * scale, jets: [1.5 * scale, 32 * scale] } : null);
   };
   track.update = update;
   SHIPS.push(track);

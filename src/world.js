@@ -434,8 +434,8 @@ function treeKinds() {
     }, 9, 2.6, 2600),
     kind((b) => { // broadleaf: lush rounded canopy puffs
       b.add(new THREE.CylinderGeometry(0.3, 0.45, 3.4, 6), TRUNK, 0, 1.7, 0);
-      b.add(new THREE.IcosahedronGeometry(2.8, 1).scale(1, 0.8, 1), 0x5f8f3e, 0, 5, 0);
-      b.add(new THREE.IcosahedronGeometry(1.9, 1), 0x78a24c, 1.3, 6.4, 0.6);
+      b.add(new THREE.IcosahedronGeometry(2.8, 0).scale(1, 0.8, 1), 0x5f8f3e, 0, 5, 0);
+      b.add(new THREE.IcosahedronGeometry(1.9, 0), 0x78a24c, 1.3, 6.4, 0.6);
     }, 8, 3, 1600),
     kind((b) => { // palm: leaning curved trunk, six drooping fronds
       b.add(new THREE.CylinderGeometry(0.2, 0.32, 7.5, 6).rotateZ(0.12), 0x9a7a55, -0.45, 3.7, 0);

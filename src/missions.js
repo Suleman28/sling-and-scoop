@@ -380,7 +380,7 @@ export function objective(d, j = d.job) {
   }
   const p = j.person, cond = j.cond === undefined ? '' : ` · condition ${Math.round(j.cond * 100)}%`, it = j.kind === 'Medicine' ? 'it' : 'them';
   if (!p.aboard && !p.held) return { x: p.pos.x, z: p.pos.z, y: /aboard/.test(j.title) ? p.pos.y - p.spec.hang : undefined, text: (/aboard/.test(j.title) ? `${j.title}: land on her helideck to take them off` : d.sea() ? `${j.title}: come alongside and stop to pull them aboard` : j.cliff ? `${j.title}: you can't land on a cliff. Hover and hook them` : `${j.title}: land nearby to pick ${it} up${(j.boater || j.kind === 'Medicine') && d.can('cargo') ? `, or hook ${it}` : ''}`) + cond };
-  return { x: j.dest.x, z: j.dest.z, ring: true, text: (d.sea() ? `Run them back to ${j.dest.name}: stop at the jetty head` : `Fly ${it} to ${j.dest.name}${j.alt ? ` (or on to ${j.alt.name}: +${Math.round((SHIFT.hospitalBonus - 1) * 100)}%)` : ''}${p.held && !p.aboard ? `: lower ${it} into the ring` : ': land on the pad'}`) + cond };
+  return { x: j.dest.x, z: j.dest.z, ring: true, text: (d.sea() ? `Run them back to ${j.dest.name}: stop at the rescue berth` : `Fly ${it} to ${j.dest.name}${j.alt ? ` (or on to ${j.alt.name}: +${Math.round((SHIFT.hospitalBonus - 1) * 100)}%)` : ''}${p.held && !p.aboard ? `: lower ${it} into the ring` : ': land on the pad'}`) + cond };
 }
 
 // Lightning has struck at (x, z): if it catches, it's a call.
@@ -481,7 +481,7 @@ export function updateDispatch(d, dt, s, say) {
       else fail(j, `Delivery cancelled: ${j.title}`, SHIFT.expireChaos);
     }
     else if (j.vessel ? j.age > SHIFT.vesselBurn * vesselScale : false) fail(j, `${j.title}: she burned to the waterline`, SHIFT.lostChaos);
-    else if (j.type === 'spot' && j.age > SHIFT.cargoTimeout) { extinguish(d.fire, j.id); fail(j, 'Nobody confirmed the smoke: the ground crews got there late', SHIFT.expireChaos); }
+    else if (j.type === 'spot' && (j.age > SHIFT.cargoTimeout || !fireStatus(d.fire, j.id).n)) { extinguish(d.fire, j.id); fail(j, 'Nobody confirmed the smoke: the ground crews got there late', SHIFT.expireChaos); }
     else if (j.type === 'fire' && !j.vessel && !fireStatus(d.fire, j.id).n) { closeCall(d, j); d.calls.splice(d.calls.indexOf(j), 1); say(`${j.title} burned itself out: ${j.burnt} cells lost`); }
   }
 
@@ -495,7 +495,8 @@ export function updateDispatch(d, dt, s, say) {
     if (j.type === 'spot') {
       const f = fireStatus(d.fire, j.id), over = f.n && Math.hypot(s.pos.x - f.x, s.pos.z - f.z) < SHIFT.spotReach && s.pos.y - groundAt(s.pos.x, s.pos.z) < 250;
       j.spotT = over ? j.spotT + dt : 0;
-      if (j.spotT > SHIFT.spotTime || !f.n) { extinguish(d.fire, j.id); finish(j, j.reward, 'Fire confirmed: the ground crews are on it.'); }
+      if (j.spotT > SHIFT.spotTime) { extinguish(d.fire, j.id); finish(j, j.reward, 'Fire confirmed: the ground crews are on it.'); }
+      else if (!f.n || j.age > SHIFT.cargoTimeout) { extinguish(d.fire, j.id); fail(j, 'Nobody confirmed the smoke: the ground crews got there late', SHIFT.expireChaos); }
       continue;
     }
     if (j.type === 'fire' && !fireStatus(d.fire, j.id).n) {
