@@ -11,7 +11,8 @@
   <meta property="og:url" content="https://slingandscoop.xyz" />
   <meta property="og:image" content="https://raw.githubusercontent.com/Suleman28/sling-and-scoop/main/docs/pr/boat.png" />
   <meta name="twitter:card" content="summary_large_image" />
-  <link rel="icon" href="data:,">
+  <script defer data-domain="slingandscoop.xyz" data-api="/pulse/e" src="/pulse/s.js"></script>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3CclipPath id='c'%3E%3Cpolygon points='14,2 50,2 62,14 62,50 50,62 14,62 2,50 2,14'/%3E%3C/clipPath%3E%3ClinearGradient id='s' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0%25' stop-color='%23231c3d'/%3E%3Cstop offset='65%25' stop-color='%2348294a'/%3E%3Cstop offset='100%25' stop-color='%231a3958'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cg clip-path='url(%23c)'%3E%3Crect width='64' height='64' fill='url(%23s)'/%3E%3Ccircle cx='32' cy='46' r='20' fill='%23f2763a' opacity='.42'/%3E%3Cpolygon points='2,50 18,30 30,39 46,24 62,50' fill='%2318132b'/%3E%3Cg transform='rotate(-5 32 13)'%3E%3Cpolygon points='5,11 59,11 58,15 6,15' fill='%23ffd060'/%3E%3Cpolygon points='5,11 15,11 14,15 6,15' fill='%23f2763a'/%3E%3Cpolygon points='49,11 59,11 58,15 50,15' fill='%23f2763a'/%3E%3Cpolygon points='28,8 36,8 37,15 27,15' fill='%23fff4e6'/%3E%3C/g%3E%3Crect x='30' y='14' width='4' height='7' fill='%23fff4e6'/%3E%3Ccircle cx='32' cy='26' r='4.5' fill='%2318132b' stroke='%23ffd060' stroke-width='2.4'/%3E%3Cpath d='M32 30.5l-8 5.5c-4.5 3.5-3 11.5 3.5 13.5 6.5 2 13.5-1.5 15.5-8l-5-2.5c-1.5 4-5.5 5.5-9 4-2.5-1.2-2.5-4 0-6l6-4.5z' fill='%23f2763a' stroke='%23fff4e6' stroke-width='.9'/%3E%3Cpolygon points='2,52 19,48 34,52 48,47 62,51 62,64 2,64' fill='%232b6e8c'/%3E%3Cpath d='M2 52 L19 48 L34 52 L48 47 L62 51' fill='none' stroke='%236fdcff' stroke-width='2.6' stroke-linejoin='round'/%3E%3C/g%3E%3Cpolygon points='14,2 50,2 62,14 62,50 50,62 14,62 2,50 2,14' fill='none' stroke='%23ffd060' stroke-width='2' opacity='.85'/%3E%3C/svg%3E">
   <style>
     html, body { margin: 0; height: 100%; overflow: hidden; background: #2a2648; font: 13px/1.4 ui-monospace, Menlo, monospace; color: #fff4e6; }
     canvas { display: block; }
@@ -51,12 +52,16 @@
     #overlay h1, #overlay h2, #overlay h3 { margin: 0; font-weight: bold; }
     #overlay h1 { font-size: 26px; letter-spacing: .18em; text-transform: uppercase; color: #fff4e6; margin-bottom: 8px; }
     #overlay.side h1 { font-size: clamp(28px, 3.8vw, 38px); letter-spacing: .16em; line-height: 1.05; margin-bottom: 2px; text-shadow: 0 2px 8px #0008; }
+    .brand { margin: 0 0 8px; }
+    .brand svg { display: block; width: min(420px, 100%); height: auto; filter: drop-shadow(0 6px 18px #000a); }
     #overlay h2 { font-size: 12px; letter-spacing: .15em; text-transform: uppercase; color: #ffd060; margin: 12px 0 6px; }
     #overlay h3 { font-size: 13px; letter-spacing: .08em; color: #ffd060; margin: 8px 0 4px; }
     #overlay p { margin: 4px 0; } #overlay .dim { opacity: .7; } #overlay .small { font-size: 12px; max-width: 52ch; }
     #overlay a { color: #ffd060; text-decoration: none; } #overlay a:hover { text-decoration: underline; }
     #overlay :focus-visible { outline: 2px solid #ffd060; outline-offset: 2px; }
-    #overlay .tag { margin: 0 0 10px; opacity: .75; letter-spacing: .28em; text-transform: uppercase; font-size: 11px; }
+    #overlay .tag { margin: 0 0 12px; opacity: .82; letter-spacing: .24em; text-transform: uppercase; font-size: 11px; }
+    .online { color: #fff4e6; letter-spacing: .16em; }
+    .online b { color: #ffd060; }
     #overlay .credit, #overlay .about { font-size: 11px; opacity: .55; max-width: 52ch; margin-top: 6px; }
     #overlay .msg { color: #ffd060; min-height: 1.2em; margin: 6px 0 4px; font-weight: bold; } #overlay .msg:empty { display: none; }
     /* Menu buttons */
@@ -138,9 +143,11 @@
     body:not([data-mode=shift]):not([data-mode=free]) :is(#hud, #board, #help, #prompt, #compass), body:not([data-mode=shift]) #meter { display: none; }
     #minimap { position: fixed; right: 14px; bottom: 14px; width: 176px; height: 176px; border-radius: 8px; border: 1px solid #fff3; opacity: .92; pointer-events: none; }
     body:not([data-mode=shift]):not([data-mode=free]) #minimap { display: none; }
-    #bigmap { background: #26526a; position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(560px, 90vmin); height: min(560px, 90vmin); border-radius: 10px; border: 1px solid #fff4; box-shadow: 0 12px 40px #0009; pointer-events: none; }
+    #bigmap { background: #26526a; position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(760px, 92vmin); height: min(760px, 92vmin); border-radius: 10px; border: 1px solid #fff4; box-shadow: 0 12px 40px #0009; pointer-events: auto; cursor: grab; }
+    #bigmap.drag { cursor: grabbing; }
     #bigmap[hidden], body:not([data-mode=shift]):not([data-mode=free]) #bigmap { display: none; } /* [hidden]: the page's canvas rule would otherwise show it */
-    #help { position: fixed; bottom: 12px; left: 14px; pointer-events: none; opacity: .8; text-shadow: 0 1px 2px #0008; }
+    #help { position: fixed; bottom: 12px; left: 14px; max-width: calc(100vw - 218px); background: #1d1830b0; border-radius: 6px; padding: 5px 9px; font-size: 11px; line-height: 1.4; pointer-events: none; opacity: .9; text-shadow: 0 1px 2px #0008; }
+    body:has(#help:not([hidden])) #prompt { bottom: 72px; }
   </style>
 </head>
 <body>

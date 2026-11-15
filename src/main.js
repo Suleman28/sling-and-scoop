@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { buildWorld, FOG, HARBOUR, LIGHTHOUSE, OILRIG, SEAS, SOLIDS, waveAt, POND, setProjects, SITES, RUNWAY, onRunway, fuelAt, groundAt, heightAt, hitTrees, PAD, PAD_RADIUS, padLocal, PADS, resetScorch, scorch, SEA, SEED } from './world.js';
+import { buildWorld, FOG, HARBOUR, LIGHTHOUSE, OILRIG, ROADS, SEAS, SOLIDS, waveAt, POND, setProjects, SITES, RUNWAY, onRunway, fuelAt, groundAt, heightAt, hitTrees, PAD, PAD_RADIUS, padLocal, PADS, resetScorch, scorch, SEA, SEED } from './world.js';
 import { buildChopper, createFlight, stepFlight } from './chopper.js';
 import { buildPlane, createPlane, drop, PLANE, stepPlane } from './plane.js';
 import { BOAT, buildBoat, createBoat, stepBoat } from './boat.js';
@@ -57,14 +57,35 @@ const moored = buildBoat(AIRFRAMES.boat), berth = createBoat(HARBOUR.x, HARBOUR.
 moored.group.rotation.order = 'YXZ';
 scene.add(moored.group);
 scene.add(craft.group);
-// Controls line follows the aircraft type; the full list lives in Settings.
-function setHelp() {
-  document.getElementById('help').hidden = !opts.hint;
-  document.getElementById('help').textContent = isBoat() ? 'W/S throttle ahead / astern · A/D wheel · Q/E side thrusters · drag or right-click/Tab to aim (look down = shorter throw, dbl-click center), hold F: fire water cannons · L searchlight · G horn · stop beside a casualty to pull them aboard · 1–5 take call · X abandon · wheel zoom · M map · K mute · Esc pause' : isPlane()
-    ? 'Space/Shift throttle · W/S pitch · A/D bank · skim the sea to scoop · F drop · 1–5 take call · X abandon · drag or right-click/Tab look · dbl-click center · wheel zoom · M map · K mute · Esc pause'
-    : `W/S pitch · A/D turn · Q/E strafe · Space/Shift climb/descend${hasTank(career) ? ' · R drop/stow snorkel · Z/C pipe length · hold F: drop water' : toolsOf(career).length ? ' · F action · R tool / stow line · Z/C winch' : ''} · 1–5 take call · X abandon · drag or right-click/Tab look · dbl-click center · wheel zoom · M map · K mute · Esc pause`;
+// Dynamic contextual controls line: only shows what's relevant right now (full list lives in Settings).
+const helpEl = document.getElementById('help');
+let lastHelp = '';
+function helpText() {
+  const call = onShift() && dispatch?.calls.length && dispatch.jobs.length < MAX_JOBS ? ` · ${dispatch.calls.length > 1 ? `1–${dispatch.calls.length}` : '1'} take call` : '';
+  const job = onShift() && dispatch?.job ? ' · X abandon' : '';
+  if (isBoat()) {
+    if (s?.moored) return `W/S throttle · R cast off · H hangar · M map${call}`;
+    if (s?.anchored) return `R weigh anchor · Drag aim · Hold F spray · M map${call}`;
+    return `W/S throttle · A/D wheel · Q/E thrusters · Drag aim · Hold F spray · R anchor · G horn${call}${job}`;
+  }
+  if (isPlane()) {
+    if (s?.onSurface && !s?.onWater) return `Space throttle · S rotate at speed · H hangar · M map${call}`;
+    if ((s?.water || 0) > 0.1) return `Hold F drop water · R ${s?.salvo ? 'salvo' : 'trail'} · W/S pitch · A/D bank · M map${call}${job}`;
+    return `Skim sea >65 km/h to scoop · W/S pitch · A/D bank · Q/E rudder · M map${call}`;
+  }
+  if (s?.grounded) return `Space lift off · W/S/A/D fly · Q/E strafe · H hangar · M map${call}`;
+  if (hasTank(career)) return `W/S/A/D fly · Space/Shift alt · ${rig?.stowed ? 'R drop snorkel' : (s?.tankWater || 0) > 0.05 ? 'Hold F drop water · R stow' : 'Z/C pipe · R stow'} · M map${call}${job}`;
+  if (!toolsOf(career).length) return `W/S/A/D fly · Space/Shift alt · Q/E strafe · M map · Esc pause${call}${job}`;
+  if (rig?.stowed) return `W/S/A/D fly · Space/Shift alt · R deploy line · M map${call}${job}`;
+  if (rig?.crate) return `F release load · Z/C winch · W/S/A/D fly · M map${job}`;
+  return `W/S/A/D fly · Space/Shift alt · F ${rig?.tool === 'bucket' ? 'dump water' : 'hook'} · Z/C winch · R tool/stow${call}${job}`;
 }
-setHelp();
+function setHelp() {
+  helpEl.hidden = !opts.hint;
+  if (!opts.hint) return;
+  const txt = helpText();
+  if (txt !== lastHelp) { helpEl.textContent = txt; lastHelp = txt; }
+}
 function refit() {
   const was = craftKind;
   applyLoadout(career);
@@ -526,9 +547,42 @@ function updateCompass(goal, type) {
 // Minimap: the island from above (painted once from the heightmap), then fires, pads, calls, the objective and you.
 const MAP = 176, SPAN = 3200, mini = Object.assign(document.createElement('canvas'), { id: 'minimap', width: MAP, height: MAP }), mctx = mini.getContext('2d');
 document.body.appendChild(mini);
-// M opens the big map: the same layers at 560 px, with place names, labelled calls and a legend.
-const BIG = 560, bigMap = Object.assign(document.createElement('canvas'), { id: 'bigmap', width: BIG, height: BIG, hidden: true }), bctx = bigMap.getContext('2d');
+// M opens the big map: the same layers at 760 px, with place names, labelled calls, legend, and wheel zoom / drag pan.
+const BIG = 760, bigMap = Object.assign(document.createElement('canvas'), { id: 'bigmap', width: BIG, height: BIG, hidden: true }), bctx = bigMap.getContext('2d');
 document.body.appendChild(bigMap);
+const mapView = { zoom: 1, x: 0, z: 0, dragging: false, lx: 0, ly: 0 };
+const clampMap = () => {
+  const max = SPAN * 0.5 * (1 - 1 / mapView.zoom);
+  mapView.x = Math.max(-max, Math.min(max, mapView.x));
+  mapView.z = Math.max(-max, Math.min(max, mapView.z));
+};
+bigMap.addEventListener('wheel', (e) => {
+  e.preventDefault(); e.stopPropagation();
+  const r = bigMap.getBoundingClientRect(), ux = (e.clientX - r.left) / r.width - 0.5, uz = (e.clientY - r.top) / r.height - 0.5;
+  const old = mapView.zoom, next = Math.min(6, Math.max(1, old * Math.exp(-e.deltaY * 0.0015)));
+  mapView.x += ux * SPAN * (1 / old - 1 / next);
+  mapView.z += uz * SPAN * (1 / old - 1 / next);
+  mapView.zoom = next;
+  clampMap();
+}, { passive: false });
+bigMap.addEventListener('pointerdown', (e) => {
+  e.stopPropagation();
+  mapView.dragging = true; mapView.lx = e.clientX; mapView.ly = e.clientY;
+  bigMap.classList.add('drag');
+  bigMap.setPointerCapture?.(e.pointerId);
+});
+bigMap.addEventListener('pointermove', (e) => {
+  if (!mapView.dragging) return;
+  const r = bigMap.getBoundingClientRect(), span = SPAN / mapView.zoom;
+  mapView.x -= ((e.clientX - mapView.lx) / r.width) * span;
+  mapView.z -= ((e.clientY - mapView.ly) / r.height) * span;
+  mapView.lx = e.clientX; mapView.ly = e.clientY;
+  clampMap();
+});
+const stopMapDrag = () => { mapView.dragging = false; bigMap.classList.remove('drag'); };
+bigMap.addEventListener('pointerup', stopMapDrag);
+bigMap.addEventListener('pointercancel', stopMapDrag);
+bigMap.addEventListener('dblclick', (e) => { e.stopPropagation(); mapView.zoom = 1; mapView.x = mapView.z = 0; });
 const paintIsland = (size) => { // the island from the heightmap, once per size
   const c = Object.assign(document.createElement('canvas'), { width: size, height: size }), g = c.getContext('2d'), img = g.createImageData(size, size);
   const tint = (h) => (h < -6 ? [38, 82, 104] : h < -0.3 ? [74, 150, 150] : h < 2 ? [226, 200, 150] : h < 60 ? [112, 150, 78] : h < 130 ? [90, 120, 66] : [150, 126, 138]);
@@ -541,24 +595,58 @@ let bigBase = null; // painted the first time the big map opens
 const PLACES = [{ ...PAD, name: 'Base' }, { ...PADS[1], name: 'Islet depot' }, ...SITES, { ...HARBOUR, x: HARBOUR.hx, z: HARBOUR.hz, name: 'Harbour' }, { ...RUNWAY, name: 'Airstrip' }, { ...LIGHTHOUSE, name: 'Lighthouse' }, { ...OILRIG, name: 'Oil Rig' }];
 const CALL_COLOR = { fire: '#ff7a4a', cargo: '#ffd060', rescue: '#6fdcff', spot: '#ffae6a' };
 function drawMap(g, size, goal, big) {
-  const k = size / MAP, mpx = (v) => (v / SPAN + 0.5) * size, dot = (x, z, r, color) => { g.fillStyle = color; g.beginPath(); g.arc(mpx(x), mpx(z), r * k ** 0.5, 0, 6.3); g.fill(); };
+  const zm = big ? mapView.zoom : 1, cx = big ? mapView.x : 0, cz = big ? mapView.z : 0;
+  const k = size / MAP, mpx = (v) => ((v - cx) / (SPAN / zm) + 0.5) * size, mpz = (v) => ((v - cz) / (SPAN / zm) + 0.5) * size;
+  const dot = (x, z, r, color) => { g.fillStyle = color; g.beginPath(); g.arc(mpx(x), mpz(z), r * k ** 0.5, 0, 6.3); g.fill(); };
   const label = (text, x, z, color = '#fff', dy = -9) => { // kept inside the frame
     g.font = '600 12px ui-monospace, monospace'; g.textAlign = 'center'; g.lineWidth = 3; g.strokeStyle = '#0009';
-    const half = g.measureText(text).width / 2 + 4, lx = Math.min(size - half, Math.max(half, mpx(x))), ly = Math.min(size - 6, Math.max(14, mpx(z) + dy));
+    const px = mpx(x), pz = mpz(z);
+    if (px < -40 || px > size + 40 || pz < -40 || pz > size + 40) return;
+    const half = g.measureText(text).width / 2 + 4, lx = Math.min(size - half, Math.max(half, px)), ly = Math.min(size - 6, Math.max(14, pz + dy));
     g.strokeText(text, lx, ly); g.fillStyle = color; g.fillText(text, lx, ly);
   };
   g.clearRect(0, 0, size, size);
-  g.drawImage(big ? bigBase : mapBase, 0, 0);
+  if (big) {
+    const sw = size / zm, sx = (cx / SPAN + 0.5) * size - sw / 2, sy = (cz / SPAN + 0.5) * size - sw / 2;
+    g.drawImage(bigBase, sx, sy, sw, sw, 0, 0, size, size);
+  } else g.drawImage(mapBase, 0, 0);
+  const pxPerM = (size * zm) / SPAN;
+  g.strokeStyle = '#d8c49a77'; g.lineWidth = Math.max(1, 3.2 * pxPerM); g.lineCap = 'round'; g.lineJoin = 'round';
+  for (const r of ROADS) {
+    g.beginPath();
+    r.forEach(([x, z], i) => (i ? g.lineTo(mpx(x), mpz(z)) : g.moveTo(mpx(x), mpz(z))));
+    g.stroke();
+  }
+  g.save();
+  g.translate(mpx(RUNWAY.x), mpz(RUNWAY.z));
+  g.rotate(-RUNWAY.yaw);
+  const rw = Math.max(3, RUNWAY.width * pxPerM), rl = Math.max(12, RUNWAY.len * pxPerM);
+  g.fillStyle = '#363842'; g.fillRect(-rw / 2, -rl / 2, rw, rl);
+  g.strokeStyle = '#fffb'; g.lineWidth = Math.max(1, 0.8 * k ** 0.5);
+  g.beginPath(); g.moveTo(0, -rl * 0.42); g.lineTo(0, rl * 0.42); g.stroke();
+  g.restore();
   g.fillStyle = '#ff5a1e';
-  for (const c of fire.burning) { const p = cellCentre(c); g.fillRect(mpx(p.x) - k, mpx(p.z) - k, 2.5 * k, 2.5 * k); }
-  for (const p of [...PADS, ...SITES]) { g.fillStyle = p.hospital ? '#fff' : '#ffffffb0'; g.fillRect(mpx(p.x) - 2 * k ** 0.5, mpx(p.z) - 2 * k ** 0.5, 4 * k ** 0.5, 4 * k ** 0.5); }
+  for (const c of fire.burning) { const p = cellCentre(c); g.fillRect(mpx(p.x) - k * zm ** 0.5, mpz(p.z) - k * zm ** 0.5, 2.5 * k * zm ** 0.5, 2.5 * k * zm ** 0.5); }
+  for (const p of SITES) {
+    const sx = mpx(p.x), sz = mpz(p.z), tr = Math.max(4 * k ** 0.5, (p.islet ? 28 : 42) * pxPerM);
+    g.fillStyle = '#2d243866'; g.beginPath(); g.arc(sx, sz, tr, 0, 6.3); g.fill();
+    g.fillStyle = '#e8a87c';
+    const b = Math.max(1.8, 6 * pxPerM);
+    for (const [ox, oz] of [[-0.45, -0.35], [0.3, -0.4], [-0.35, 0.35], [0.4, 0.3]]) g.fillRect(sx + ox * tr - b / 2, sz + oz * tr - b / 2, b, b);
+    if (p.hospital) {
+      const cr = Math.max(3, 5 * k ** 0.5);
+      g.fillStyle = '#fff'; g.fillRect(sx - cr, sz - cr, cr * 2, cr * 2);
+      g.fillStyle = '#d8352a'; g.fillRect(sx - cr * 0.65, sz - cr * 0.22, cr * 1.3, cr * 0.44); g.fillRect(sx - cr * 0.22, sz - cr * 0.65, cr * 0.44, cr * 1.3);
+    }
+  }
+  for (const p of [...PADS, ...SITES]) if (!p.hospital) { g.fillStyle = '#ffffffc8'; g.fillRect(mpx(p.x) - 2 * k ** 0.5, mpz(p.z) - 2 * k ** 0.5, 4 * k ** 0.5, 4 * k ** 0.5); }
   dot(HARBOUR.x, HARBOUR.z, 2.5, '#9fd0ff');
-  g.save(); g.translate(mpx(OILRIG.x), mpx(OILRIG.z)); g.scale(k ** 0.5, k ** 0.5);
+  g.save(); g.translate(mpx(OILRIG.x), mpz(OILRIG.z)); g.scale(k ** 0.5, k ** 0.5);
   g.fillStyle = '#f2b632'; g.strokeStyle = '#000a'; g.lineWidth = 1;
   g.beginPath(); g.moveTo(0, -4.5); g.lineTo(4.5, 0); g.lineTo(0, 4.5); g.lineTo(-4.5, 0); g.closePath(); g.fill(); g.stroke();
   g.restore();
   const shipIcon = (x, z, yaw, variant) => {
-    g.save(); g.translate(mpx(x), mpx(z)); g.rotate(-yaw); g.scale(k ** 0.5, k ** 0.5);
+    g.save(); g.translate(mpx(x), mpz(z)); g.rotate(-yaw); g.scale(k ** 0.5, k ** 0.5);
     g.fillStyle = variant === 'passenger' ? '#ffffff' : variant === 'cargo' ? '#ffb366' : '#dfe5f2';
     g.strokeStyle = '#000a'; g.lineWidth = 1;
     g.beginPath(); g.moveTo(0, -6.5); g.lineTo(2.4, -2.2); g.lineTo(2.4, 5.0); g.lineTo(1.7, 6.0); g.lineTo(-1.7, 6.0); g.lineTo(-2.4, 5.0); g.lineTo(-2.4, -2.2); g.closePath();
@@ -576,16 +664,27 @@ function drawMap(g, size, goal, big) {
     for (const sh of SHIPS) label(sh.name, sh.x, sh.z, sh.variant === 'passenger' ? '#9fe8f5' : '#ffd08a', sh.variant === 'passenger' ? -12 : 16);
   }
   if (dispatch && (big || t % 1 < 0.7)) for (const o of dispatch.calls) { dot(o.x, o.z, 3.5, CALL_COLOR[o.type]); if (big) label(o.type.toUpperCase(), o.x, o.z, CALL_COLOR[o.type], 18); }
-  if (goal) { g.strokeStyle = '#fff'; g.lineWidth = 1.5; g.beginPath(); g.arc(mpx(goal.x), mpx(goal.z), 6 * k ** 0.5, 0, 6.3); g.stroke(); }
+  if (goal) { g.strokeStyle = '#fff'; g.lineWidth = 1.5; g.beginPath(); g.arc(mpx(goal.x), mpz(goal.z), 6 * k ** 0.5, 0, 6.3); g.stroke(); }
   g.save(); // you: an arrow along your heading (north, -z, is up)
-  g.translate(mpx(s.pos.x), mpx(s.pos.z)); g.rotate(-s.yaw); g.scale(k ** 0.5, k ** 0.5);
+  g.translate(mpx(s.pos.x), mpz(s.pos.z)); g.rotate(-s.yaw); g.scale(k ** 0.5, k ** 0.5);
   g.fillStyle = '#fff'; g.strokeStyle = '#000a'; g.lineWidth = 1;
   g.beginPath(); g.moveTo(0, -7); g.lineTo(4.5, 5); g.lineTo(0, 2.5); g.lineTo(-4.5, 5); g.closePath(); g.fill(); g.stroke();
   g.restore();
-  if (big) { // legend
+  if (big) { // legend, zoom indicator & controls
     g.font = '12px ui-monospace, monospace'; g.textAlign = 'left';
-    [['Fire', CALL_COLOR.fire], ['Cargo', CALL_COLOR.cargo], ['Rescue', CALL_COLOR.rescue], ['Burning', '#ff5a1e'], ['Oil Rig', '#ffb84d'], ['Cargo ship', '#ffd08a'], ['Ferry', '#9fe8f5']].forEach(([n, c], i) => { g.fillStyle = '#0008'; g.fillRect(10, 10 + i * 18, 96, 16); g.fillStyle = c; g.fillRect(14, 14 + i * 18, 8, 8); g.fillStyle = '#fff'; g.fillText(n, 28, 22 + i * 18); });
-    g.fillStyle = '#fffb'; g.textAlign = 'right'; g.fillText('M: close', size - 10, size - 10);
+    [['Fire', CALL_COLOR.fire], ['Cargo', CALL_COLOR.cargo], ['Rescue', CALL_COLOR.rescue], ['Burning', '#ff5a1e'], ['Oil Rig', '#ffb84d'], ['Cargo ship', '#ffd08a'], ['Ferry', '#9fe8f5'], ['Settlement', '#e8a87c']].forEach(([n, c], i) => { g.fillStyle = '#0008'; g.fillRect(10, 10 + i * 18, 104, 16); g.fillStyle = c; g.fillRect(14, 14 + i * 18, 8, 8); g.fillStyle = '#fff'; g.fillText(n, 28, 22 + i * 18); });
+    g.fillStyle = '#0008'; g.fillRect(size - 96, 10, 86, 28);
+    g.fillStyle = '#fff'; g.textAlign = 'right'; g.fillText(`ZOOM ${zm.toFixed(1)}×`, size - 16, 24);
+    g.fillStyle = '#fff3'; g.fillRect(size - 90, 29, 74, 4);
+    g.fillStyle = '#ffd060'; g.fillRect(size - 90, 29, 74 * ((zm - 1) / 5), 4);
+    const hint = 'Wheel: zoom · Drag: pan · Dbl-click: reset · M: close';
+    const hw = g.measureText(hint).width + 14;
+    g.fillStyle = '#0008'; g.fillRect(size - hw - 8, size - 26, hw, 18);
+    g.fillStyle = '#fffe'; g.textAlign = 'right'; g.fillText(hint, size - 15, size - 13);
+  } else {
+    g.font = 'bold 11px ui-monospace, monospace'; g.textAlign = 'right';
+    g.fillStyle = '#0008'; g.fillRect(size - 52, size - 20, 47, 15);
+    g.fillStyle = '#fffd'; g.fillText('M: Map', size - 9, size - 9);
   }
 }
 const drawMini = (goal) => { drawMap(mctx, MAP, goal, false); if (!bigMap.hidden) drawMap(bctx, BIG, goal, true); };
@@ -612,7 +711,109 @@ const rankLine = (gained = 0) => {
     <span class="xpbar"><i style="width:${was}%"></i><i class="new" style="left:${was}%;width:${now - was}%"></i></span>
     <span class="dim">Next: <b>${next.name}</b> unlocks ${next.unlocks}</span>`;
 };
-const menuHtml = () => `<h1>SLING &amp; SCOOP</h1><p class="tag">Island air dispatch</p><nav class="menu">
+const track = (name, props) => { try { window.plausible?.(name, props ? { props } : undefined); } catch {} };
+let pilotsOnline = 0;
+const refreshOnline = () => fetch('/api/online').then((r) => (r.ok ? r.json() : null)).then((d) => {
+  const next = d && typeof d.online === 'number' ? d.online : 0;
+  if (next !== pilotsOnline) {
+    pilotsOnline = next;
+    if (mode === 'title') render(menuHtml(), 'title');
+  }
+}).catch(() => {});
+refreshOnline();
+setInterval(() => { if (!document.hidden) refreshOnline(); }, 30000);
+
+const LOGO = `<svg viewBox="0 0 436 116" role="img" aria-label="Sling &amp; Scoop">
+  <defs>
+    <clipPath id="badgeClip">
+      <polygon points="22,6 92,6 108,22 108,90 92,106 22,106 6,90 6,22"/>
+    </clipPath>
+    <linearGradient id="gSky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#231c3d"/>
+      <stop offset="65%" stop-color="#48294a"/>
+      <stop offset="100%" stop-color="#1a3958"/>
+    </linearGradient>
+    <linearGradient id="gSun" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffd060" stop-opacity="0.72"/>
+      <stop offset="100%" stop-color="#f2763a" stop-opacity="0.22"/>
+    </linearGradient>
+    <linearGradient id="gSling" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fff6eb"/>
+      <stop offset="48%" stop-color="#ffd060"/>
+      <stop offset="100%" stop-color="#f2763a"/>
+    </linearGradient>
+    <linearGradient id="gScoop" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="45%" stop-color="#9fe8f5"/>
+      <stop offset="100%" stop-color="#2ebbd6"/>
+    </linearGradient>
+    <linearGradient id="gWake" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#1a4d6b" stop-opacity="0.25"/>
+      <stop offset="22%" stop-color="#2b6e8c" stop-opacity="0.95"/>
+      <stop offset="72%" stop-color="#3ec5d4" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="#9fe8f5" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="gCrest" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#6fdcff" stop-opacity="0.35"/>
+      <stop offset="35%" stop-color="#9fe8f5" stop-opacity="1"/>
+      <stop offset="82%" stop-color="#fff4e6" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Left Aviation Crest (consistent with the browser favicon) -->
+  <polygon points="24,9 94,9 110,25 110,93 94,109 24,109 8,93 8,25" fill="#0d0919" opacity="0.7"/>
+  <g clip-path="url(#badgeClip)">
+    <rect x="6" y="6" width="102" height="100" fill="url(#gSky)"/>
+    <circle cx="57" cy="78" r="31" fill="url(#gSun)"/>
+    <polygon points="6,84 31,52 51,67 77,42 108,84" fill="#18132b"/>
+    <polygon points="31,52 41,64 21,84 6,84" fill="#f2763a" opacity="0.28"/>
+    <polygon points="77,42 86,58 67,84 51,67" fill="#ffd060" opacity="0.2"/>
+
+    <!-- Rotor blades (tilted slightly for motion) -->
+    <g transform="rotate(-5 57 23)">
+      <polygon points="12,21 102,21 100,25 14,25" fill="#ffd060"/>
+      <polygon points="12,21 27,21 26,25 14,25" fill="#f2763a"/>
+      <polygon points="87,21 102,21 100,25 88,25" fill="#f2763a"/>
+      <rect x="26" y="21" width="62" height="1.3" fill="#fff4e6" opacity="0.75"/>
+      <polygon points="51,17 63,17 65,25 49,25" fill="#fff4e6"/>
+    </g>
+
+    <!-- Winch mast & orange '&' sling hook -->
+    <rect x="54.5" y="24" width="5" height="9" fill="#fff4e6"/>
+    <line x1="57" y1="33" x2="57" y2="40" stroke="#ffd060" stroke-width="2.4"/>
+    <g transform="translate(1.5,2.5)" opacity="0.75">
+      <circle cx="57" cy="44" r="5" fill="#0d0919"/>
+      <path d="M57 49 L46 57 C39 62 41 74 50 77 C60 80 70 75 73 65 L66 62 C64 68 58 70 53 68 C49 66 49 62 53 59 L62 52 Z" fill="#0d0919"/>
+    </g>
+    <circle cx="57" cy="44" r="5" fill="#18132b" stroke="#ffd060" stroke-width="2.6"/>
+    <path d="M57 49 L46 57 C39 62 41 74 50 77 C60 80 70 75 73 65 L66 62 C64 68 58 70 53 68 C49 66 49 62 53 59 L62 52 Z" fill="#f2763a" stroke="#fff4e6" stroke-width="1" stroke-linejoin="round"/>
+
+    <!-- Low-poly ocean wave at badge base -->
+    <polygon points="6,86 33,80 58,86 83,79 108,85 108,106 6,106" fill="#1e5473"/>
+    <polygon points="33,80 58,86 44,106 6,106 6,86" fill="#2b6e8c"/>
+    <path d="M6 86 L33 80 L58 86 L83 79 L108 85" fill="none" stroke="#6fdcff" stroke-width="3" stroke-linejoin="round"/>
+  </g>
+  <polygon points="22,6 92,6 108,22 108,90 92,106 22,106 6,90 6,22" fill="none" stroke="#ffd060" stroke-width="1.8" opacity="0.7"/>
+  <polyline points="6,88 22,104 92,104 108,88" fill="none" stroke="#6fdcff" stroke-width="1.8" opacity="0.6"/>
+
+  <!-- Wordmark Lockup -->
+  <g font-family="'Arial Black', 'Avenir Next', Impact, system-ui, sans-serif" font-weight="900" font-style="italic" letter-spacing="2">
+    <text x="127" y="49" font-size="45" fill="#0d0919">SLING</text>
+    <text x="124" y="45" font-size="45" fill="url(#gSling)" stroke="#140f26" stroke-width="6" paint-order="stroke" stroke-linejoin="round">SLING</text>
+
+    <text x="128" y="92" font-size="34" fill="#0d0919">&amp;</text>
+    <text x="125" y="88" font-size="34" fill="#f2763a" stroke="#140f26" stroke-width="5" paint-order="stroke" stroke-linejoin="round">&amp;</text>
+
+    <text x="163" y="93" font-size="45" fill="#0d0919">SCOOP</text>
+    <text x="160" y="89" font-size="45" fill="url(#gScoop)" stroke="#140f26" stroke-width="6" paint-order="stroke" stroke-linejoin="round">SCOOP</text>
+  </g>
+
+  <!-- Sweeping Scoop Wake -->
+  <path d="M120 101 C182 97 238 102 308 98 C358 95 394 97 424 89 C404 102 356 105 292 106 C214 107 156 104 120 101 Z" fill="url(#gWake)"/>
+  <path d="M120 101 C182 97 238 102 308 98 C358 95 394 97 424 89" fill="none" stroke="url(#gCrest)" stroke-width="2.6" stroke-linecap="round"/>
+</svg>`;
+const menuHtml = () => `<div class="brand">${LOGO}</div><p class="tag">Island air dispatch${pilotsOnline > 0 ? ` · <span class="online"><b>${pilotsOnline}</b> ${pilotsOnline === 1 ? 'player' : 'players'} online</span>` : ''}</p><nav class="menu">
   ${btn('Digit1', 'Start shift', 'Fight wildfires, sling cargo, pull people out of trouble')}
   ${btn('Digit2', 'Free roam', 'No calls, no clock, unlimited fuel')}
   ${btn('Digit3', 'Hangar', `Bank $${career.bank.toLocaleString()}`)}
@@ -701,6 +902,7 @@ function morph(a, b) {
   for (let i = an.length - 1; i >= bn.length; i--) a.removeChild(an[i]);
 }
 setMode('title');
+setHelp();
 // With the hint off, tell new players once where the controls went.
 function tip() {
   if (opts.hint || opts.tipSeen) return;
@@ -717,6 +919,7 @@ function startFree() {
   towHome();
   resumeTo = 'free';
   setMode('free');
+  track('free_roam', { airframe: career.airframe });
   tip();
 }
 function startShift(daily = false) {
@@ -738,6 +941,7 @@ function startShift(daily = false) {
   window.__game.dispatch = dispatch;
   resumeTo = 'shift';
   setMode('shift');
+  track('shift_start', { airframe: career.airframe, daily });
   tip();
 }
 const cost = (n) => (Math.round(n) ? `−$${Math.round(n).toLocaleString()}` : '<span class="dim">—</span>');
@@ -761,6 +965,7 @@ function endShift(quit) {
     <canvas class="route" width="300" height="300"></canvas><p class="dim small">Your route this shift, and where each job ended</p>
     <nav class="menu row">${btn('Digit1', 'New shift')}${btn('KeyH', 'Hangar')}${btn('Escape', 'Main menu')}</nav></section>`;
   setMode('results');
+  track('shift_end', { airframe: career.airframe, grade, quit: !!quit });
   drawReport(overlay.querySelector('canvas.route'), dispatch);
 }
 // The shift report: the island, your track (sampled every 2 s) and a dot where each job finished.
@@ -1089,8 +1294,8 @@ renderer.setAnimationLoop((now) => {
     : rig.stowed ? 'LINE   stowed (R to let it out)'
     : !hasLine() ? 'LINE   none (rescues only)'
     : `${rig.tool === 'bucket' ? `BUCKET ${bar(rig.water / RIG.cap)} ${Math.round((rig.water / RIG.cap) * 100)}%` : `HOOK   ${held}`}\nLINE   ${rig.len <= 0.15 ? 'stowed' : `${rig.len.toFixed(1)} m`} (Z/C)`;
-  hud.textContent = `SLING & SCOOP\nALT ${alt.toFixed(0).padStart(4)} m\nSPD ${(speed * 3.6).toFixed(0).padStart(4)} km/h\nV/S ${s.vel.y.toFixed(1).padStart(5)} m/s\nWND ${wind.str.toFixed(0).padStart(4)} m/s${weather.storm > 0.05 ? ' SQUALL' : ''}\nFUEL   ${bar(s.fuel)} ${Math.round(s.fuel * 100)}%\n${s.damage > 0.005 ? `HULL   ${bar(1 - s.damage)} ${Math.round((1 - s.damage) * 100)}%\n` : ''}${load}${opts.fps ? `\n${fps} fps` : ''}`;
-  if (frames % 15 === 0) patch(board, boardHtml(goal));
+  hud.textContent = `SLING & SCOOP\nALT ${alt.toFixed(0).padStart(4)} m\nSPD ${(speed * 3.6).toFixed(0).padStart(4)} km/h\nV/S ${s.vel.y.toFixed(1).padStart(5)} m/s\nWND ${wind.str.toFixed(0).padStart(4)} m/s${weather.storm > 0.05 ? ' SQUALL' : ''}\nFUEL   ${bar(s.fuel)} ${Math.round(s.fuel * 100)}%\n${s.damage > 0.005 ? `HULL   ${bar(1 - s.damage)} ${Math.round((1 - s.damage) * 100)}%\n` : ''}${load}${opts.fps ? `\n${fps} fps` : ''}${pilotsOnline > 0 ? `\n● ${pilotsOnline} ${pilotsOnline === 1 ? 'player' : 'players'} online` : ''}`;
+  if (frames % 15 === 0) { patch(board, boardHtml(goal)); setHelp(); }
   if (frames % 6 === 0) drawMini(goal);
   if (onShift()) patch(meter, meterHtml());
   updateCompass(goal, dispatch?.job?.type);
