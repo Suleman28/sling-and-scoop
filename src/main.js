@@ -1284,7 +1284,7 @@ renderer.setAnimationLoop((now) => {
     : rig.stowed ? 'LINE   stowed (R to let it out)'
     : !hasLine() ? 'LINE   none (rescues only)'
     : `${rig.tool === 'bucket' ? `BUCKET ${bar(rig.water / RIG.cap)} ${Math.round((rig.water / RIG.cap) * 100)}%` : `HOOK   ${held}`}\nLINE   ${rig.len <= 0.15 ? 'stowed' : `${rig.len.toFixed(1)} m`} (Z/C)`;
-  hud.textContent = `SLING & SCOOP\nALT ${alt.toFixed(0).padStart(4)} m\nSPD ${(speed * 3.6).toFixed(0).padStart(4)} km/h\nV/S ${s.vel.y.toFixed(1).padStart(5)} m/s\nWND ${wind.str.toFixed(0).padStart(4)} m/s${weather.storm > 0.05 ? ' SQUALL' : ''}\nFUEL   ${bar(s.fuel)} ${Math.round(s.fuel * 100)}%\n${s.damage > 0.005 ? `HULL   ${bar(1 - s.damage)} ${Math.round((1 - s.damage) * 100)}%\n` : ''}${load}${opts.fps ? `\n${fps} fps` : ''}${pilotsOnline > 0 ? `\n● ${pilotsOnline} ${pilotsOnline === 1 ? 'player' : 'players'} online` : ''}`;
+  hud.textContent = `SLING & SCOOP\nALT ${alt.toFixed(0).padStart(4)} m\nSPD ${(speed * 3.6).toFixed(0).padStart(4)} km/h\nV/S ${s.vel.y.toFixed(1).padStart(5)} m/s\nWND ${wind.str.toFixed(0).padStart(4)} m/s${weather.storm > 0.05 ? ' SQUALL' : ''}\nFUEL   ${bar(s.fuel)} ${Math.round(s.fuel * 100)}%\n${s.damage > 0.005 ? `HULL   ${bar(1 - s.damage)} ${Math.round((1 - s.damage) * 100)}%\n` : ''}${load}${opts.fps ? `\n${fps} fps` : ''}`;
   if (frames % 15 === 0) { patch(board, boardHtml(goal)); setHelp(); }
   if (frames % 6 === 0) drawMini(goal);
   if (onShift()) patch(meter, meterHtml());
