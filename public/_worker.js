@@ -7,7 +7,7 @@ export default {
     if (url.pathname === '/pulse/s.js' && request.method === 'GET') {
       if (!host) {
         return new Response('', {
-          headers: { 'Content-Type': 'application/javascript; charset=utf-8' },
+          headers: { 'Content-Type': 'application/javascript; charset=utf-8', 'Cache-Control': 'no-store' },
         });
       }
       const res = await fetch(`${host}/js/script.pageview-props.tagged-events.js`);
@@ -33,6 +33,20 @@ export default {
         body: await request.text(),
       });
       return new Response(res.body, { status: res.status });
+    }
+
+    if (url.pathname === '/api/online' && request.method === 'GET') {
+      if (!host || !env.PLAUSIBLE_API_KEY) {
+        return Response.json({ online: 0 }, { headers: { 'Cache-Control': 'no-store' } });
+      }
+      const site = encodeURIComponent(env.PLAUSIBLE_SITE_ID || 'slingandscoop.xyz');
+      const res = await fetch(`${host}/api/v1/stats/realtime/visitors?site_id=${site}`, {
+        headers: { Authorization: `Bearer ${env.PLAUSIBLE_API_KEY}` },
+      });
+      const online = res.ok ? Number(await res.text()) || 0 : 0;
+      return Response.json({ online }, {
+        headers: { 'Cache-Control': 'public, max-age=15' },
+      });
     }
 
     return env.ASSETS.fetch(request);
