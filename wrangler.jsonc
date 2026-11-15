@@ -1,6 +1,5 @@
 {
   "name": "sling-and-scoop",
   "compatibility_date": "2026-10-23",
-  "main": "worker.js",
-  "assets": { "directory": "./dist", "binding": "ASSETS", "run_worker_first": ["/pulse/*"] }
+  "pages_build_output_dir": "./dist"
 }
