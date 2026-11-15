@@ -6,9 +6,9 @@ Context for AI coding agents working on this repo. Read this first, then `PLAN.m
 A browser game: low-poly island air dispatch. You fly helicopters and a water bomber through short, escalating "shifts" (fight wildfires with a slung bucket or the bomber, sling cargo, rescue hikers/boaters), chain jobs for combo pay, and spend the bank in a hangar. Warm-dusk, flat-shaded look.
 
 ## Stack and hard rules
-- **Three.js + Vite, plain JavaScript (ES modules).** No TypeScript, no framework, no physics engine.
+- **Three.js + Vite, plain JavaScript (ES modules).** No TypeScript, no framework. Rapier (`physics.js`) simulates loose world objects and, with the "Physics flight" setting (default on), the helicopter body, the rope (a joint) and crash wrecks. `stepFlight`/`stepPlane` still own the controls and the static world (terrain, trees); `stepRig` is the classic rope.
 - **Everything is procedural.** Models are built from Three.js primitives in code. No model/texture files. The only asset is one credited sound (`public/sfx/airplane_prop.wav`, CC BY 3.0). Don't add assets without asking, and credit anything you add in `README.md`.
-- **Don't add dependencies.** `three` and `vite` are the only ones.
+- **Don't add dependencies.** `three`, `@dimforge/rapier3d-compat` and `vite` are the only ones.
 - **60 fps on an integrated GPU is a hard requirement.** Watch draw calls (~20 in normal play) and triangle counts.
 - **Keep it small.** Match the surrounding code's comment density, naming and idiom. No speculative abstractions.
 - **Don't change the flight/gameplay feel unless asked.** Model work should leave `npm test` passing.
@@ -17,8 +17,8 @@ A browser game: low-poly island air dispatch. You fly helicopters and a water bo
 ```sh
 npm install
 npm run dev            # game: http://localhost:5173/
-                       # model viewer: http://localhost:5173/inspect.html?model=plane (also house, hospital, loads)
-npm test               # node self-checks: flight, rig, fire, shift, career, plane
+                       # model viewer: http://localhost:5173/inspect.html?model=plane (also boat, house, hospital, loads)
+npm test               # node self-checks: flight, rig, fire, shift, career, costs, plane, firefight, physics, boat
 npm run build          # static site in dist/
 ```
 **Model changes are not done until you've looked at them in `inspect.html`.** Check every view (keys 1–7: side, front, rear, top, under, ¾ front, ¾ rear) and confirm every part actually touches what it attaches to: no floating wings, gaps at the tail, inverted cones or paper-thin fins. Past mistakes in exactly these spots are why this rule exists. Then fly the aircraft in the game to see it from the chase camera.
@@ -26,16 +26,18 @@ npm run build          # static site in dist/
 ## File map (src/)
 | File | What's in it |
 |---|---|
-| `main.js` | Loop (fixed 60 Hz sim + interpolation), input, camera, HUD, modes (title/shift/results/hangar), wiring |
-| `world.js` | Terrain heightmap and biomes, trees/palms/farmhouses, rocks, roads, water, sky, base (pad, hangar, runway), towns (`house`, `hospital` models), lighthouse, fire fuel, scorching |
+| `main.js` | Loop (fixed 60 Hz sim + interpolation), input, camera (chase and cockpit), HUD, minimap, modes (title/shift/results/hangar), weather (`stepWeather`/`drawWeather`), airframe damage and repair, effects (`explodeFx`, `splashFx`, `dustFx`), shift grade, wiring |
+| `world.js` | Terrain heightmap and biomes, trees/palms/farmhouses, rocks, roads, water, sky, base (pad, hangar, runway), towns (`house`, `hospital` models), lighthouse, harbour jetty (`HARBOUR`, `buildHarbour`), the swell (`waveAt`, `SEAS`), surf foam, dusk lights, solid buildings (`SOLIDS`, also pushed-out collision in `hitTrees`), fire fuel, scorching |
 | `chopper.js` | Helicopter flight (`stepFlight`, `TUNE`) **and helicopter models** (`buildChopper`, `BODIES`), plus the shared model helpers |
 | `plane.js` | Water bomber flight (`stepPlane`, `PLANE`) **and its model** (`buildPlane`) |
+| `boat.js` | Rescue Cutter handling (`stepBoat`, `BOAT`: monitors, jet) **and its model** (`buildBoat`) |
 | `tools.js` | Rope/bucket/hook physics (`RIG`) **and load models** (crate, heavy cargo, person, bucket/hook/rope views) |
+| `physics.js` | Rapier world (lazy-loaded): terrain/tree/building/sea colliders, loose loads (they float), exploding drum piles, downwash, and (physics flight) the craft body, rope joint and wrecks |
 | `fire.js` | Cellular wildfire sim + flame/smoke rendering |
-| `missions.js` | Dispatch director, jobs, chaos/combo, markers |
+| `missions.js` | Dispatch director, jobs (incl. sea rescues, volatile cargo, lightning strikes), chaos/combo, markers |
 | `career.js` | Save data, upgrades, `AIRFRAMES` (stats, livery, camera distance, scale) |
-| `life.js` | Ambient moving scenery: clouds, gulls, sailboats (no collision) |
-| `fx.js`, `audio.js` | Pooled particles; synthesized audio + the prop loop |
+| `life.js` | Ambient moving scenery: clouds, gulls, sailboats, dolphins, navigation buoys, fishing trawlers (no collision) |
+| `fx.js`, `audio.js` | Pooled particles and rain (`makeRain`); synthesized audio (incl. `boom`, `splosh`) + the prop loop |
 
 ## Model conventions (read before touching any model)
 - **Units are metres.** The **local frame**: ground contact at **y = 0** (skid bottoms / wheel bottoms), **nose toward −z**, +x is right (starboard), +y up. The physics treats the object's origin as that ground point, so a model floating above or sinking below y = 0 will look wrong in-game.
@@ -50,15 +52,16 @@ npm run build          # static site in dist/
 - **Plane** (`buildPlane` in `plane.js`): its fuselage is one lathe bent upward toward the tail with `sweep(z)`, so the tail sweeps up without a separate boom. Props spin about z. It must return `{ group, beacon, strobe, spin(dt, power) }`.
 - **Things tied to model geometry elsewhere.** Update these if the shape changes:
   - `AIRFRAMES[...]` in `career.js`: `scale`, `cam` (chase distance), `body`/`trim` colours, and `rig.anchor` (rope attach height: under the Heavy Lifter's spine it's 2.45).
-  - `RIG` in `tools.js`: each load's `hang` (hook point to the bottom of the load) and `radius` must match its mesh. Load meshes have their **origin at the top (the hook point)** and hang down.
+  - `RIG` in `tools.js`: each load's `hang` (hook point to the bottom of the load), `radius` and physics `box` (half-extents) must match its mesh. Load meshes have their **origin at the top (the hook point)** and hang down.
   - Collision is a simple sphere (radius 1.8, plane 2.5) and ground contact at the origin. Big visual changes to size may need these adjusted.
 - **Palette:** warm dusk.
   - Liveries: Scout yellow/charcoal, Utility cream/teal, Heavy Lifter light grey/red, Water Bomber yellow/red.
   - Shared constants: `DARK` (0x2a2a32) for metal and rotors, `GLASS` (0x1f3346) for windows.
   - Orange accents (0xf2763a): rotor tips and the Utility fin.
-- **Budget:** keep each aircraft to roughly a few thousand triangles. Low-poly, flat-shaded and chunky is the style; readable silhouettes beat detail.
+- **Budget:** keep each aircraft to roughly a few thousand triangles. Low-poly, flat-shaded and chunky is the style; readable silhouettes beat detail. **Exception:** the Rescue Cutter (`boat.js`, ~13.5k triangles) is deliberately high-detail, at the owner's request. Don't use it as precedent for other models.
 
 ## Workflow
 - After model work: `npm test`, view the model in `inspect.html` from all 7 views, fly it in-game, then `npm run build`.
+- **Token usage:** before you finish a task or open a PR, run `npm run tokens`. It re-tallies tokens from the local Claude Code and Antigravity session logs and rewrites the table in `README.md` (and `tokens.json`; commit both). It reads outside the workspace, so it may need the sandbox lifted. If your tool isn't one of those two, say so in the PR; don't invent numbers or edit the table by hand. If a new model or tool has contributed, add it to the list at the top of `README.md`.
 - Record notable design decisions in `PLAN.md` under the latest "Resolved decisions" section.
 - Commit only when asked. Commits are signed via 1Password (the user may need to approve).

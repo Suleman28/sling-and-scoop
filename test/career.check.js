@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { TUNE } from '../src/chopper.js';
 import { RIG } from '../src/tools.js';
-import { AIRFRAMES, applyLoadout, buyOrSelectAirframe, buyUpgrade, loadCareer, MAX_LEVEL, newCareer, recordShift, saveCareer, upgradeCost, upgradesFor } from '../src/career.js';
+import { AIRFRAMES, applyLoadout, buyGear, buyOrSelectAirframe, buyUpgrade, toolsOf, loadCareer, MAX_LEVEL, newCareer, recordShift, saveCareer, upgradeCost, upgradesFor } from '../src/career.js';
 
 const mem = () => { const m = new Map(); return { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => m.set(k, v) }; };
 
@@ -22,7 +22,8 @@ assert.match(buyUpgrade(c, 'bucket'), /maxed/);
 for (const f in AIRFRAMES) for (const k of upgradesFor(f)) for (let l = 1; l < MAX_LEVEL; l++) assert.ok(upgradeCost(f, k, l) > upgradeCost(f, k, l - 1));
 assert.ok(upgradeCost('heavy', 'power', 0) > upgradeCost('utility', 'power', 0) && upgradeCost('utility', 'power', 0) > upgradeCost('scout', 'power', 0));
 assert.deepEqual(upgradesFor('scout'), ['power', 'fuel']);
-assert.deepEqual(upgradesFor('bomber'), ['bucket', 'power', 'fuel']);
+assert.deepEqual(upgradesFor('bomber'), ['bucket', 'scoop', 'aero', 'power', 'fuel']);
+assert.deepEqual(upgradesFor('boat'), ['pump', 'helm', 'power', 'fuel']);
 assert.equal(upgradesFor('heavy').length, 4);
 c.airframe = 'scout';
 assert.match(buyUpgrade(c, 'line'), /doesn't apply/);
@@ -48,7 +49,7 @@ const m = loadCareer(old);
 assert.deepEqual(m.levels.scout, { power: 3, fuel: 5 });
 assert.deepEqual(m.levels.heavy, { bucket: 2, line: 1, power: 3, fuel: 5 });
 assert.deepEqual(m.levels.utility, { bucket: 0, line: 0, power: 0, fuel: 0 });
-assert.deepEqual(m.levels.bomber, { bucket: 0, power: 0, fuel: 0 });
+assert.deepEqual(m.levels.bomber, { bucket: 0, scoop: 0, aero: 0, power: 0, fuel: 0 });
 assert.ok(m.bank === 50 && m.airframe === 'heavy' && m.best === 7);
 
 // Airframes: buy once, then switching is free.
@@ -99,4 +100,21 @@ console.log('career ok');
   c.bank = 1000;
   assert.match(buyProject(c, 'towers'), /Need/);
   console.log('projects ok');
+}
+
+// Gear: the Utility's bucket is bought separately; the Heavy Lifter's comes with it; old saves keep a Utility's bucket.
+{
+  const c = newCareer();
+  c.bank = 20000;
+  buyOrSelectAirframe(c, 'utility');
+  assert.deepEqual(toolsOf(c), ['hook']);
+  assert.match(buyGear(c, 'bucket'), /fitted/);
+  assert.equal(c.bank, 20000 - 5000 - 2500);
+  assert.deepEqual(toolsOf(c), ['bucket', 'hook']);
+  assert.match(buyGear(c, 'bucket'), /already/);
+  assert.deepEqual(toolsOf(c, 'heavy'), ['bucket', 'hook']);
+  const st = mem();
+  st.setItem('rotor-relay-career', JSON.stringify({ bank: 0, owned: ['scout', 'utility'], airframe: 'utility' }));
+  assert.deepEqual(toolsOf(loadCareer(st)), ['bucket', 'hook']);
+  console.log('gear ok');
 }

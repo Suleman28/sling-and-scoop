@@ -9,11 +9,105 @@
 - **Repo housekeeping:** a short CONTRIBUTING note pointing to AGENTS.md (the conventions and the `inspect.html` model check) and `npm test`.
 
 ## Post-deploy updates (planned)
-- **Damage and repairs:**
-  - Hard landings and strikes fill a visible damage meter on the HUD, which could affect handling at high damage.
-  - You pay to repair at a pad, where a "Repairing… −$X" prompt shows, like refuelling.
-  - A maintenance workshop island project halves the repair price. Its model (`workshop` in world.js) is already built and viewable in inspect.html.
-  - Charging repairs silently at the end of a shift was tried and removed: invisible damage felt unfair.
+- **Damage and repairs:** the damage meter and base repair shipped in Phase 9. Still planned: a maintenance workshop island project to halve the repair price (its model, `workshop` in world.js, is built and viewable in inspect.html).
+
+## Resolved decisions (Phase 12: expanded harbour, ships, offshore oil rig, cutter & bomber overhauls)
+- **Expanded harbour & living vessels:** added fishing pier, marina finger slips, outer L-shaped breakwater, Container & Ferry Pier, and a separate Coastguard & Rescue Station wing (`world.js`), with full `SOLIDS` and `boatEnv` collision. Added `MV Heron` (container ship) and `SS Meridian` (passenger ferry) via `buildShip(variant)` (`ship.js`, `life.js`): both berth clear of the main quay, turn in open water outside the pier, back cleanly into berth, carry wakes (`makeWake`), show on the map with tapered silhouettes, and have solid/landable decks (`shipSolids`, `deckAt`, `boatEnv`).
+- **Offshore Oil Rig:** detailed `OILRIG` (`world.js`) with K-braced jacket, conductor pipes, boat landing, 3-storey quarters, orange lifeboat, pedestal crane, lattice derrick, flare boom, and an `H` helideck (`deckAt`, `SOLIDS`, `boatEnv`), plus offshore fire/rescue calls (`missions.js`), longer boat mission durations, vessel route clearance, and an `Offshore refuel` island project (`career.js`).
+- **Rescue Cutter anchor & upgrades:** added dock mooring/auto-moor and ocean anchor (`KeyR`) with a visibly mounted starboard bow hawsepipe anchor, lowering chain animation, and smooth `anchorDrop`/`anchorWeigh` audio (`boat.js`, `audio.js`, `main.js`). Added `Monitor pumps` and `Thrusters & helm` upgrades (`career.js`).
+- **Water Bomber & chopper flight overhaul:** updated `buildPlane` (`plane.js`) with upward dihedral, leading-edge de-ice boots, wingtip winglets, animated belly drop doors and scoop probes, and livery detail; updated `stepPlane` with control inertia, bank/airspeed lift, idle/scoop drag, `R` Salvo/Trail toggle, and `High-flow scoops` / `Flaps & control surfaces` upgrades (`career.js`). Improved helicopter pitch-coupled thrust and carving (`chopper.js`) and smoothed `"Physics flight"` rope-joint feedback and winch retraction (`physics.js`). Optimized `makeWake` (`fx.js`) and vessel frustum culling (`life.js`) for steady 60+ fps.
+
+## Resolved decisions (Phase 11: missions overhaul, living island)
+- **Menus are morphed, not rebuilt.** Every overlay write goes through `render(html, screen)`. A new screen replaces the content and plays its entrance; the same screen again is morphed (`morph`), so only changed nodes are touched: no flicker, no replayed animation, scroll kept. `data-keep` protects nodes built in code (the hangar showroom canvas); `data-fresh` forces a replace when its value changes (a new hangar message, a settings tab), so it plays its entrance. The in-flight board and meter use the same patching (`patch`). One easing curve (`--ease`) and press, hover and fill transitions throughout; all motion is off under `prefers-reduced-motion`.
+- **The cutter fights boats, not land.** Shoreline fires burned out before she could get there, so her fire calls are vessels on fire at sea (`j.vessel`, `heat` 1 → 0). Her monitors' water puts them out (`douseAt`, from `splash`). Untended, the heat creeps back up, and after `SHIFT.vesselBurn` she's lost.
+- **Patients and clinics.** Casualties have a `severity`, and their condition (`cond`) falls over time (serious ~4 min, minor ~8 min); pay scales 0.4–1 with it. A minor case's destination is the nearest town clinic, with the hospital as `alt` (+25%).
+- **Calls near you.** `nearPick` puts half the new calls near your position, so a second job on the way is common.
+- **Light work.** Passengers between towns and urgent medicine (a parcel, collected by landing or with the hook). They're about 45% of rescue calls for aircraft without a hook (the Scout) and 18% otherwise. Aircraft that can't fight fires get fire-spotting calls instead (type `spot`): fly over the smoke for 2 s, and the ground crews put it out (`extinguish` in fire.js).
+- **Hook and cutter rescues.** Swimmers in a rip off a beach (from Line Pilot) and climbers on a cliff you can't land on (from Senior Pilot, hook only).
+- **Pilot ranks** (`RANKS`, `rankOf`, `career.xp` = gross pay earned):
+  - Trainee: small wildfires, light cargo, ordinary rescues, passengers, medicine, spotting.
+  - Line Pilot: house and car fires, car crashes, the freighter, rip rescues, night shifts.
+  - Senior Pilot: large wildfires, heavy and volatile cargo, cliff and shipboard rescues.
+  - Captain: major wildfires, foundering trawlers.
+  - Old saves get XP from what they own. Rank shows on the title screen and the results screen, with a promotion line.
+- **Night shifts** (from Line Pilot, a quarter of shifts, decided by the seed): pay +30%, dark fog, sky and light, searchlight on, a brighter lighthouse beam.
+- **Daily challenge** (title key 5): the seed comes from the date (`dailySeed`), so it's the same shift for everyone; the best net per day is kept in `career.daily`.
+- **Shift report:** the results screen draws your route (sampled every 2 s) and a dot where each job finished.
+- **Scars heal.** Scorched ground and trees regrow halfway each shift (`resetScorch(houses, regrow)`) instead of resetting. Visual only: fuel isn't reduced.
+- **Living harbour** (`life.js`): a trawler that leaves its berth, goes out to sea and comes back; a fuel truck on the base–harbour road (`fuelTruck`, in inspect.html). The lighthouse beam has two arms.
+
+- **Phase 10b fixes and features.**
+  - **Bomber:** no searchlight. The chase camera leans by `sin(roll)`, since `s.roll` keeps counting past 2π through a barrel roll and used to leave the view tilted or upside down.
+  - **Cutter monitors:** range follows the camera pitch (`s.jetK`, 0.3–1, range ∝ k²): look down for ~10 m, level for ~100 m. The physics push uses the same arc. Holding F stops the camera drifting back. L switches the cutter's searchlight too.
+  - **Line gear:** the Utility ships with the hook only; its bucket is a $2,500 kit (`AIRFRAMES.utility.gear`, `career.gear`, `buyGear`, `toolsOf`, hangar key G). Fire calls need a bucket, and old saves that own a Utility keep theirs. R cycles bucket, hook, then stowed (no line at all).
+  - **Moored cutter:** she lies at her berth, riding the swell, whenever you aren't sailing her. She's scenery only.
+  - **Big map (M; mute moved to K):** the minimap's layers at 560 px with place names, labelled calls and a legend.
+  - **Islet hamlets:** Northcay and Gull Rock are towns (`SITES`, `islet: true`). They're off the road network and wildfires don't start there (the islets are too small), but cargo, rescues and house fires do.
+  - **Harbour road:** the harbour's shore end is a road-network node, so a road runs from the base gate to the jetty. `HARBOUR` is computed before the roads now.
+  - **Two jobs at once (`MAX_JOBS`).** `d.jobs` holds them and `d.job` is the one in focus (beacon, compass, objective text); J cycles it (`cycleFocus`). Pickups and deliveries run on every taken job, so a second casualty near the first can board too. The job not in focus gets a faint beacon. X hands back the focused job.
+  - **Cutter aim ring** follows the throw (`s.jetK`) and shrinks for short throws.
+- **Low-poly is the game's identity.** A smooth, shader-textured terrain was tried (noise detail, bump lighting, rock streaks) and dropped: it looked generic and halved the frame rate. Instead the terrain went HD low-poly:
+  - 5 m cells (`SEGS = 560`, ~627k triangles), crisp facets (85% face normal).
+  - Each cell is split along the diagonal whose corners are closer in height (`flip(i, j)`), so facets fold along ridges and valleys. `heightAt` and the Rapier trimesh use the same rule, so contact stays exact.
+  - Colour is picked from the smoothed slope at a triangle's corners, so both halves of a square agree (the old per-triangle normal made slopes checkered).
+  - Rock is two-tone blotches, not stripes. A snowcap covers the gentle high ground above `snowLine(x, z)` (~125–170 m), and nothing burns above it (`fuelAt`). Scorch handles `TREE_CELL / CELL` terrain cells per fire cell.
+  - Same GPU cost per frame as the old 10 m terrain on the dev Mac; still to be tried on an integrated GPU (7 m cells is the fallback).
+- **Waterjet wake and surface foam (`fx.js`).** Earlier hard-edged foam streaks faded to black under normal blending and drew under the water.
+  - `makeRings` is now soft additive foam blobs, drawn after the water and lifted 0.1 + 0.15 × `SEAS.h` above the swell (the 35 m water facets sag below `waveAt` in troughs).
+  - `makeWake` builds the cutter's wake from crumbs dropped along her track: twin jet streams that merge and fade, a bow wave hugging the hull that breaks into patchy Kelvin-arm whitecaps (0.34 × speed sideways), and a churning foam plume per nozzle that steers with it and boils forward under the reversing buckets.
+  - The nozzle steering sign was fixed: D swings the jets to starboard.
+- **Soft particles.** Smoke, dust, spray and fire puffs are camera-facing discs with fading edges (`puffGeometry` + `billboard` in `fx.js`), not flat hexagons; debris keeps low-poly chunks (`soft: false`).
+- **Crashes.**
+  - Severity scales the blast (20 m/s gives 0.5, 42 m/s and up the full 1.6).
+  - A helicopter's main rotor is torn off and flung, then lands and skids to a stop (`throwRotor`); the craft is rebuilt on the tow.
+  - A wreck in the sea ditches: splash and steam, no fire, and it floods and sinks (the wreck's draft grows in `physics.js`).
+  - **Respawn bug fixed:** `spawnCraft()` now clears `wreck`, `damage`, `hit`, `crashV`, `ditched`. It's copied over the old state, so a towed wreck used to come home still wrecked and burning.
+  - Dynamic rollover was considered and left out: ground roll only follows the slope, and >37° already bounces you off.
+- **Harbour, physics and warm-dusk pass (an earlier Gemini session, verified here).**
+  - The harbour rebuild (`harbour()`, `inspect.html?model=harbour`) was checked from all 7 views. It has a stone quay, timber walkway and T-head, piles, a landing stage, a boathouse, a refuel point, a davit crane and festoon lights.
+  - Rapier gained pier colliders, a third drum stack on the pier head (23 drums), swell-slope drift for floating bodies, an oriented cutter hull collider, and jet, thruster and monitor wash on floating things. Helicopters on the freighter's deck turn with her (`SHIP.dYaw`).
+  - Water and shore: deeper water colours, turquoise shallows, a foam outline at the beach, shore-parallel surf bars, lit windows, warmer clouds and ambient boats.
+  - Not done, despite the claims in the earlier notes: `waveAt` is still the original two sines, and there is no tone mapping, no sun shimmer and no shadow map (the `castShadow` flags are inert).
+- **Cutter.** Twin waterjets replace props and rudders. Q/E bow and stern thrusters crab her sideways, and A/D pivots her at rest. She slides along walls (step obstacles) instead of pinning. A stall going ahead in an astern crosswind is fixed. All are covered in `test/boat.check.js`.
+
+## Resolved decisions (Phase 9: cutter, weather, damage, solid world)
+- **The Rescue Cutter replaces the dinghy** (same `AIRFRAMES.boat` key, `boat: true`; $9,000, not the old $3,000). A 21 m fire and rescue cutter (~13.5k triangles) is the one deliberately fine model, an owner-requested exception to the low-poly budget: it is the showpiece of the harbour and only one is ever on screen. It takes sea rescues and shoreline fires (`d.sea()`), so the water has a job for a vehicle that is not an aircraft.
+- **Monitors are aimed with the mouse.** The monitors and searchlight follow the camera yaw (`s.aim`), F sprays, G is the horn. The camera is already how you look around, so aiming costs no extra keys and leaves W/S/A/D free for driving.
+- **Weather.** A squall every ~5 minutes lasting ~1.5, driven by one `weather.storm` 0..1 value: wind with gusts, sea state (`SEAS.h` up to 3), fog, dimmer light, rain, lightning with delayed thunder. One scalar keeps wind, water and sky in step and costs no new systems. Lightning can start fires; on shift it becomes a "Lightning strike near …" call, so a storm creates work as well as hazard.
+- **Damage and repair.** Hits over 6 m/s accumulate `s.damage` (below the 20 m/s `CRASH`): it costs engine power (`env.power`), smokes, and at 100% is a wreck. It is repaired by stopping at base ("Repairing…", `COSTS.repair`); a wreck costs `COSTS.crash`. This is the visible meter the earlier silent end-of-shift charge lacked (HUD shows HULL).
+- **Volatile cargo.** "Fuel drums" and "Gas bottles" pay more but explode on a hard knock (`VOLATILE` in `missions.js`, `d.blast`): no pay and the combo is lost. Gives the existing drum explosions a risk/reward use in the job board.
+- **Buildings are solid for everything.** `SOLIDS` boxes in `world.js` feed both the loose-body colliders in Rapier and a pushed-out check in `hitTrees`, so aircraft and slung loads hit houses too (before, only loose things did). Aircraft stay hand-rolled against the static world, as with trees.
+- **Water is one function.** `waveAt(x, z, t)` scaled by `SEAS.h` drives the water mesh, floating bodies, the cutter (pitch and roll) and buoys; crests are vertex-coloured, so whitecaps appear in a blow without a texture. Shoreline foam (`buildSurf`), dusk lights (`buildLights`) and a recoloured seabed (so the terrain's square edge no longer shows) are cosmetic.
+- **Harbour and life.** `HARBOUR`/`buildHarbour` puts a timber jetty nearest the base as the cutter's home (refuel, hangar). Dolphins, channel and hazard buoys and trawlers are decoration only (`life.js`).
+- **Minimap, cockpit view, shift grade.** The minimap (bottom right: island, fires, pads, calls, objective, you) answers "where is the call" without opening anything. V toggles a cockpit camera (no interior model yet). The results screen grades the shift S to D from net pay minus losses, to give a target beyond the number.
+- **Not done:** the cutter passes through the jetty and breakwater (only the seabed stops it); rain does not change fire spread; no cockpit interior; all Phase 8 and 9 tuning values need a hands-on play-test. Multiplayer stays as proposed in Phase 8.
+
+## Resolved decisions (Phase 8: sim layer, boat, harbour)
+- **"Feels like a sim, plays like an arcade game."** The stick still commands a velocity and neutral collective still holds a hover, so nothing has to be trimmed. On top of that sit real helicopter behaviours that only bite when you fly badly, each with a HUD line saying how to get out: vortex ring state, rotor spool-up, autorotation with a flare, fuel weight, sprung skids, slope landings and fire thermals. Vortex ring needs ~2.5 s of full vertical descent above 10 m, so an ordinary landing never meets it.
+- **Rescue Boat (now the Rescue Cutter, Phase 9).** A third vehicle kind (`boat: true`) beside helicopter and plane, kinematic in Rapier like the bomber, so it shoves floating drums and cargo. It only takes sea rescues and lands them at the harbour jetty; fire and cargo stay with aircraft. Originally a cheap ($3,000) dinghy; the cutter costs $9,000.
+- **One swell.** `waveAt` in `world.js` is the water mesh's own wave function; floating bodies and the boat ride it (plus a small chop), so things sit on the water you can see.
+- **Multiplayer (not built; proposed shape).** Co-op first: 2–4 pilots on one shift, shared chaos meter and board, each in their own craft. The repo already deploys to Cloudflare, so a Durable Object per room relaying over WebSocket fits without a new client dependency. Each client simulates its own craft and sends pose at ~15 Hz; the room host's client owns the director, fire grid and loose physics and sends events and snapshots (the fire sim and director are already seeded and deterministic). Needs deciding before any code: co-op vs competitive, who is host, and whether a server-side dependency (`wrangler`/Durable Objects) is acceptable under the "no dependencies" rule.
+
+## Resolved decisions (Phase 7: physics engine)
+- **The loose world reacts (second pass).** The engine was simulating boxes nobody had a reason to touch, so the pass is about consequences rather than more flight modelling; `stepFlight` is unchanged.
+  - Water: loose bodies skip the sea-floor collider and float by a per-load `draft` with drag and a small swell; vehicles ride low, casualties' rafts sit on top. Things going in report a splash.
+  - Oil drums are explosive: a jolt over `DRUM.pop` (ramming, a dropped load, a swung bucket) or burning ground sets one off. A blast is a radial impulse capped per body, short random fuses on drums within `DRUM.chain` (so a pile ripples rather than vanishing in one frame), and an `ignite` on the fire grid, so a careless pilot can start the wildfire they then have to fight. Piles are restacked at the start of each shift.
+  - Downwash is a radial force on drums and non-person loads under a low rotor; people are left out because a side force topples their thin box.
+  - Buildings are static boxes from `SOLIDS`. Wrecks explode, burn and smoke for 5 s before the tow.
+  - `physics.step` returns events and `main.js` owns all the effects, so `physics.js` stays renderer-free apart from the drum mesh.
+- **Flight physics (hybrid), on by default; Settings → "Physics flight" switches back to the classic model.**
+  - The controls are unchanged: `stepFlight` still turns the stick into a velocity. The helicopter is then a dynamic Rapier body (no gravity, rotation locked). Rapier adds what the world does to it, and `stepFlight` eases back toward its target, so knocks linger. It collides only with loose things; ground, cliffs and trees stay hand-rolled (probes, reflect).
+  - The rope is a Rapier rope joint (rebuilt when the winch changes its length) to a real bucket/hook ball or to the hooked load's own body. The rotor carries the load's weight up to `RIG.maxLift`; beyond that the load pulls the craft down and holds it. Load inertia is real: a container roughly halves how fast you can accelerate. Water, slosh and attitude rocking are shared with the classic rig (`settleRig`).
+  - An impact over `CRASH` (20 m/s) turns the aircraft (helicopter or bomber) into a tumbling box with gravity. The load drops and it's towed home after 5 s (3 s for running out of fuel). Hillsides and trees at speed now crash where they used to bounce.
+  - The bomber flies as before: its state is speed along a direction, so it stays kinematic until it wrecks.
+  - Node checks cover the classic flight and rig unchanged, plus the physics path (`physics.check.js`: hover on the rope, lift, overload, ram-and-wreck).
+- **Rapier (`@dimforge/rapier3d-compat`) runs the loose world, not the flight.** The goal is to push what a browser game can do, so the original "no physics engine" rule is lifted for world objects. Helicopter, plane and rope stay hand-rolled so the flight feel and `npm test` are unchanged.
+  - Free loads (crates, heavy cargo, casualties) are dynamic boxes (`RIG[...].box`): they tumble, roll and stack. A load on the hook is kinematic and shoves what it swings into; the aircraft is a kinematic ball that bulldozes loose things without feeling them.
+  - Colliders: the terrain's own triangles, a floor at sea level, a cone per tree, and a cylinder per tower. Houses were added later (`SOLIDS`, Phase 9).
+  - Oil-drum pyramids (one instanced mesh) on the base apron and at the islet depot, there to be knocked over.
+  - `c.hit` is now each step's change in velocity, so tree strikes, drops and getting rammed all count as rough handling.
+  - Lazy-loaded: the WASM chunk is ~1.6 MB gzipped. Until it's ready (and in node checks) loads use the old `stepCrate`. Step cost ~0.4 ms; the one-off ~50 ms broad-phase build happens during load.
+  - Multiplayer later: physics must stay off the flight model so a host can own the world bodies and stream them.
 
 ## Resolved decisions (Phase 6c: island projects, hangar)
 - **Island projects** ($45k in total), bought in the hangar with keys A–E. They're built into the world, so you can see what you bought:

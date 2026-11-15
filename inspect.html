@@ -20,20 +20,24 @@
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
     import { buildChopper } from './src/chopper.js';
     import { buildPlane } from './src/plane.js';
+    import { buildBoat } from './src/boat.js';
+    import { buildShip } from './src/ship.js';
     import { AIRFRAMES } from './src/career.js';
     import { buildBucketMesh, buildCrateMesh, buildHeavyMesh, buildHookMesh, buildPersonMesh } from './src/tools.js';
     import { bodyBaker } from './src/chopper.js';
-    import { fuelFarm, hangar, hospital, house, lookout, mulberry32, pond, station, workshop } from './src/world.js';
+    import { fuelTruck, sailboat, trawler } from './src/life.js';
+    import { fuelFarm, hangar, harbour, hospital, house, lookout, mulberry32, oilRig, pond, station, workshop } from './src/world.js';
     const baked = (fill) => { const b = bodyBaker(); fill(b); return new THREE.Mesh(b.geometry(), new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true })); };
 
     const MODELS = {
       scout: () => buildChopper(AIRFRAMES.scout).group, utility: () => buildChopper(AIRFRAMES.utility).group,
-      heavy: () => buildChopper(AIRFRAMES.heavy).group, plane: () => buildPlane(AIRFRAMES.bomber).group,
+      heavy: () => buildChopper(AIRFRAMES.heavy).group, plane: () => buildPlane(AIRFRAMES.bomber).group, boat: () => { const g = buildBoat(AIRFRAMES.boat).group, beams = []; g.traverse((o) => o.material?.blending === THREE.AdditiveBlending && beams.push(o)); beams.forEach((o) => o.removeFromParent()); return g; }, // without the searchlight beam, which would dwarf the model
+      ship: () => buildShip().group, shipcargo: () => buildShip('cargo').group, shippassenger: () => buildShip('passenger').group, truck: () => baked(fuelTruck), trawler: () => baked(trawler), sailboat: () => baked((b) => sailboat(b, false)),
       bucket: buildBucketMesh, hook: buildHookMesh,
       crate: buildCrateMesh, container: () => buildHeavyMesh('container'), vehicle: () => buildHeavyMesh('vehicle'),
       cabin: () => buildHeavyMesh('cabin'), person: buildPersonMesh,
       house: () => baked((b) => house(b, 6, 7, 0xe8c9a4, 0xb5523b, mulberry32(1))), hospital: () => baked(hospital), hangar: () => baked(hangar),
-      station: () => baked(station), pond: () => baked(pond), workshop: () => baked(workshop), fuelfarm: () => baked(fuelFarm), lookout: () => baked(lookout),
+      harbour: () => baked(harbour), oilrig: () => baked(oilRig), station: () => baked(station), pond: () => baked(pond), workshop: () => baked(workshop), fuelfarm: () => baked(fuelFarm), lookout: () => baked(lookout),
     };
     const name = new URLSearchParams(location.search).get('model') || 'plane';
     document.getElementById('ui').innerHTML = Object.keys(MODELS).map((k) => `<a href="?model=${k}">${k === name ? `<b>${k}</b>` : k}</a>`).join('') +
